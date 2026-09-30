@@ -1,6 +1,6 @@
 {
   "name": "voice",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Text-to-speech for agent replies and microphone dictation, through Velox",
   "author": {
     "name": "José Victor Ferreira"
