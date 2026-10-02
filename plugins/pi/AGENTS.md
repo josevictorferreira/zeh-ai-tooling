@@ -5,86 +5,85 @@
 **Branch:** main
 
 ## OVERVIEW
-Single Bun/TypeScript pi package containing ten independently loaded extensions. Pi loads `extensions/*/index.ts` through jiti; there is no build step and the repository has one root package boundary.
+Bun/TypeScript pi extensions, one directory each (`plugins/pi/<plugin>/index.ts`), loaded independently by pi through jiti; there is no build step. `package.json` here is the single package boundary (typecheck only). Nix installs them: see `harnesses/pi/default.nix`.
 
 ## STRUCTURE
 ```text
-.
-├── extensions/              # loadable pi extensions
-│   ├── codegraph/            # CodeGraph CLI-backed semantic exploration
-│   ├── context7/             # Context7 documentation API client
-│   ├── hindsight/            # Hindsight memory API and automatic retention
-│ ├── lsp/ # language-server client, configuration, and pi hooks
-│ ├── notify/ # desktop notifications for agent outcomes via notify-send
-│ ├── skill-state/ # SKILL.state runtime: /state-run bounded-state agent loop
-│ ├── stt/ # microphone dictation into the prompt via Velox
-│ ├── subagents/ # tmux-pane subagents: launch/check/send/close tools, steer hand-back
-│ ├── tts/ # spoken summary of the last reply via Velox
-│ └── web-tools/ # Velox web search and URL extraction
-├──.agents/plans/ # tracked design plans
-├──.agents/specs/ # reviewed implementation specs (skill-state, notify)
-├── package.json              # pi package metadata and check script
-├── tsconfig.json             # strict no-emit TypeScript configuration
-└── README.md                 # package and plugin documentation
+plugins/pi/
+├── codegraph/      # CodeGraph CLI-backed semantic exploration
+├── context7/       # Context7 documentation API client
+├── hindsight/      # Hindsight memory API and automatic retention
+├── lsp/            # language-server client, configuration, and pi hooks
+├── notify/         # desktop notifications for agent outcomes via notify-send
+├── skill-state/    # SKILL.state runtime: /state-run bounded-state agent loop
+├── stt/            # microphone dictation into the prompt via Velox
+├── subagents/      # tmux-pane subagents: launch/check/send/close tools, steer hand-back
+├── tts/            # spoken summary of the last reply via Velox
+├── web-tools/      # Velox web search and URL extraction
+├── .agents/plans/  # tracked design plans
+├── .agents/specs/  # reviewed implementation specs (skill-state, notify)
+├── package.json    # typecheck script and dev dependencies
+├── tsconfig.json   # strict no-emit TypeScript configuration
+└── README.md       # plugin documentation
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 | --- | --- | --- |
-| Add or change a plugin tool | `extensions/<plugin>/index.ts` | Each entry point default-exports `(pi: ExtensionAPI) => void`. |
-| Understand a plugin contract | `extensions/<plugin>/README.md` | Documents tool parameters, environment variables, and external API behavior. |
-| Change language-server lifecycle | `extensions/lsp/index.ts` | Lazy client startup, edit/write diagnostics, `lsp` tool, `/lsp`, shutdown cleanup. |
-| Change JSON-RPC or diagnostics state | `extensions/lsp/client.ts` | Hand-rolled stdio framing, requests, notifications, file sync, pushed diagnostics. |
-| Change server catalog/config merging | `extensions/lsp/servers.ts` | Built-ins, trusted project config, root discovery, validation. |
+| Add or change a plugin tool | `<plugin>/index.ts` | Each entry point default-exports `(pi: ExtensionAPI) => void`. |
+| Understand a plugin contract | `<plugin>/README.md` | Documents tool parameters, environment variables, and external API behavior. |
+| Change language-server lifecycle | `lsp/index.ts` | Lazy client startup, edit/write diagnostics, `lsp` tool, `/lsp`, shutdown cleanup. |
+| Change JSON-RPC or diagnostics state | `lsp/client.ts` | Hand-rolled stdio framing, requests, notifications, file sync, pushed diagnostics. |
+| Change server catalog/config merging | `lsp/servers.ts` | Built-ins, trusted project config, root discovery, validation. |
 | Change package/typechecking setup | `package.json`, `tsconfig.json` | Only script is `bun run check`; compiler includes `extensions`. |
 | Understand installation/loading | `README.md`, `package.json` | `pi.extensions` points at `./extensions`; plugins ship without local dependencies. |
-| Understand or change the spoken-summary flow | `extensions/tts/index.ts` | `/speak` command and `ctrl+alt+s` shortcut; Velox chat summary + audio speech, local playback. |
-| Understand or change the dictation flow | `extensions/stt/index.ts` | `/dictate` command and `ctrl+alt+d` shortcut; local recording via `pw-record`/`ffmpeg`, Velox transcription, transcript appended to the prompt editor. |
-| Understand or change desktop notifications | `extensions/notify/index.ts`, `.agents/specs/0002-notify/plan.md` | Classifies `agent_settled` outcomes into success/question/error; sends a `notify-send`-style argv via `pi.exec` with a 5 s timeout; dedupes by assistant message id. |
-| Understand the SKILL.state design and its limits | `.agents/specs/0001-skill-state-plan.md`, `extensions/skill-state/README.md` | Paper claims vs. what is reproduced; verification gates; honesty notes. |
-| Change the state-run loop, retry, or telemetry | `extensions/skill-state/runner.ts` | Algorithm 1: render → complete → parse/validate → merge → execute; rollback-retry ≤ 2; per-step telemetry; `onEvent` trace. |
-| Debug a state-run | `/state-log` in Pi, then `bun extensions/skill-state/tools/runlog.ts <runId> [--rejections | --step N --prompt] --cwd <project>` | Reads `~/.pi/agent/skill-state/<cwd>/logs/<runId>.jsonl`; `listRunLogs` in `runlog.ts` is shared by the command and the tool. |
-| Change the state schema, merge bounds or phase policy | `extensions/skill-state/schemas.ts`, `extensions/skill-state/state.ts` | TypeBox schemas with `additionalProperties: false`; `⊕` merge with null-delete, list replacement, 6 KB cap; `phaseErrors` and `actionErrors` enforce the inspect budget, the 2-step planning limit, read-only streaks in editing, and changed-files-before-testing as rejection errors. |
-| Change the action vocabulary or observation caps | `extensions/skill-state/executor.ts`, `extensions/skill-state/prompt.ts` | Repo-local actions, 200 lines / 8 KB observations; prompt text mirrors paper Appendix A.4. |
-| Change the built-in SE skill or `--skill` loading | `extensions/skill-state/workflow.ts` | Spec ≤ 4 KB, used verbatim as `{spec}`. |
-| Change how subagents are launched, polled or handed back | `extensions/subagents/index.ts`, `extensions/subagents/tmux.ts` | `subagent_launch/check/send/close`, `/subagents [--all]`, 1.5 s poller, `subagent-result` message via `deliverAs: "steer"`; tmux session `pi-<root id8>`, tiled panes. |
-| Change what a subagent reports or how it falls back | `extensions/subagents/child.ts` | Active when `PI_SUBAGENT_TASK` is set: result/status per `agent_settled`, inbox poll, one `setModel` fallback. |
-| Change subagent types, overrides or the task registry | `extensions/subagents/types.ts`, `extensions/subagents/state.ts` | Built-in explorer/researcher/worker/oracle; `~/.pi/agent/subagents/<type>.md` overrides; one JSON per task under `~/.pi/agent/subagents/<cwd>/<root>/tasks/`. |
+| Understand or change the spoken-summary flow | `tts/index.ts` | `/speak` command and `ctrl+alt+s` shortcut; Velox chat summary + audio speech, local playback. |
+| Understand or change the dictation flow | `stt/index.ts` | `/dictate` command and `ctrl+alt+d` shortcut; local recording via `pw-record`/`ffmpeg`, Velox transcription, transcript appended to the prompt editor. |
+| Understand or change desktop notifications | `notify/index.ts`, `.agents/specs/0002-notify/plan.md` | Classifies `agent_settled` outcomes into success/question/error; sends a `notify-send`-style argv via `pi.exec` with a 5 s timeout; dedupes by assistant message id. |
+| Understand the SKILL.state design and its limits | `.agents/specs/0001-skill-state-plan.md`, `skill-state/README.md` | Paper claims vs. what is reproduced; verification gates; honesty notes. |
+| Change the state-run loop, retry, or telemetry | `skill-state/runner.ts` | Algorithm 1: render → complete → parse/validate → merge → execute; rollback-retry ≤ 2; per-step telemetry; `onEvent` trace. |
+| Debug a state-run | `/state-log` in Pi, then `bun skill-state/tools/runlog.ts <runId> [--rejections | --step N --prompt] --cwd <project>` | Reads `~/.pi/agent/skill-state/<cwd>/logs/<runId>.jsonl`; `listRunLogs` in `runlog.ts` is shared by the command and the tool. |
+| Change the state schema, merge bounds or phase policy | `skill-state/schemas.ts`, `skill-state/state.ts` | TypeBox schemas with `additionalProperties: false`; `⊕` merge with null-delete, list replacement, 6 KB cap; `phaseErrors` and `actionErrors` enforce the inspect budget, the 2-step planning limit, read-only streaks in editing, and changed-files-before-testing as rejection errors. |
+| Change the action vocabulary or observation caps | `skill-state/executor.ts`, `skill-state/prompt.ts` | Repo-local actions, 200 lines / 8 KB observations; prompt text mirrors paper Appendix A.4. |
+| Change the built-in SE skill or `--skill` loading | `skill-state/workflow.ts` | Spec ≤ 4 KB, used verbatim as `{spec}`. |
+| Change how subagents are launched, polled or handed back | `subagents/index.ts`, `subagents/tmux.ts` | `subagent_launch/check/send/close`, `/subagents [--all]`, 1.5 s poller, `subagent-result` message via `deliverAs: "steer"`; tmux session `pi-<root id8>`, tiled panes. |
+| Change what a subagent reports or how it falls back | `subagents/child.ts` | Active when `PI_SUBAGENT_TASK` is set: result/status per `agent_settled`, inbox poll, one `setModel` fallback. |
+| Change subagent types, overrides or the task registry | `subagents/types.ts`, `subagents/state.ts` | Built-in explorer/researcher/worker/oracle; `~/.pi/agent/subagents/<type>.md` overrides; one JSON per task under `~/.pi/agent/subagents/<cwd>/<root>/tasks/`. |
 
 ## CODE MAP
 The package has 22 TypeScript source files and no tests. Reference counts below are structural indicators from the source layout rather than a generated call graph.
 
 | Symbol | Type | Location | Role |
 | --- | --- | --- | --- |
-| default | extension factory | `extensions/*/index.ts` | Registers each plugin's tools and event handlers. |
-| `LspClient` | class | `extensions/lsp/client.ts:57` | Owns one language-server child process and JSON-RPC state. |
-| `loadConfig` | function | `extensions/lsp/servers.ts:197` | Merges built-ins, user config, and trusted project config. |
-| `findRoot` | function | `extensions/lsp/servers.ts:105` | Finds the nearest configured workspace marker without leaving the project root. |
-| `clientsFor` | function | `extensions/lsp/index.ts:100` | Lazily selects or starts clients per `(server, root)` pair. |
-| `runCodegraph` | function | `extensions/codegraph/index.ts:94` | Executes the external CodeGraph CLI and normalizes output/errors. |
-| `callContext7` | function | `extensions/context7/index.ts:31` | Performs Context7 HTTP requests with timeout and optional auth. |
-| `callApi` | function | `extensions/hindsight/index.ts:67` | Calls Hindsight bank endpoints for recall and retention. |
-| `callVelox` | function | `extensions/web-tools/index.ts:23` | Calls Velox search/fetch endpoints with timeout and optional auth. |
-| `run` | function | `extensions/skill-state/runner.ts:79` | SKILL.state loop; takes an injected `complete` so it can be driven by a stub. |
-| `execute` | function | `extensions/skill-state/executor.ts:162` | Executes one repo action; never throws, errors become observations. |
-| `merge` | function | `extensions/skill-state/state.ts:80` | Atomic `Σ ⊕ ΔΣ` with bound checks and rollback. |
-| `render` / `lastFencedJson` | functions | `extensions/skill-state/prompt.ts:32`, `:65` | Single-message prompt; parses the last fenced JSON block. |
-| `validateStepResponse` | function | `extensions/skill-state/schemas.ts:93` | TypeBox validation returning error paths that name offending keys. |
-| `loadSpec` | function | `extensions/skill-state/workflow.ts:35` | Built-in spec or `--skill` file, ≤ 4 KB. |
-| `saveCheckpoint` / `listCheckpoints` | functions | `extensions/skill-state/checkpoints.ts` | Per-cwd durable checkpoint files under the Pi agent dir. |
-| `stateRunTool` / `runStateRunTool` | functions | `extensions/skill-state/tool-registry.ts` | globalThis registry of sibling read-only tools; vocabulary, validation and execution for the `tool` action. |
-| `openRunLog` | function | `extensions/skill-state/runlog.ts` | Per-run JSONL trace (prompts, replies, rejections, states, observations) next to the checkpoints; `tools/runlog.ts` reads it. |
-| `spawnPane` / `listPanes` / `killPane` | functions | `extensions/subagents/tmux.ts` | tmux adapter over an injected `pi.exec`; session per root, first subagent is the first pane, tiled layout. |
-| `registerChild` | function | `extensions/subagents/child.ts` | Child-role hooks: result + status per settled turn, inbox poll, single fallback-model switch. |
-| `resolveType` / `resolveSkills` | functions | `extensions/subagents/types.ts` | Built-in type merged with `~/.pi/agent/subagents/<type>.md`; skill names → `--skill` paths. |
-| `listTree` / `updateTask` | functions | `extensions/subagents/state.ts` | File-per-task registry under the Pi agent dir, atomic writes, launch-tree helpers. |
+| default | extension factory | `*/index.ts` | Registers each plugin's tools and event handlers. |
+| `LspClient` | class | `lsp/client.ts:57` | Owns one language-server child process and JSON-RPC state. |
+| `loadConfig` | function | `lsp/servers.ts:197` | Merges built-ins, user config, and trusted project config. |
+| `findRoot` | function | `lsp/servers.ts:105` | Finds the nearest configured workspace marker without leaving the project root. |
+| `clientsFor` | function | `lsp/index.ts:100` | Lazily selects or starts clients per `(server, root)` pair. |
+| `runCodegraph` | function | `codegraph/index.ts:94` | Executes the external CodeGraph CLI and normalizes output/errors. |
+| `callContext7` | function | `context7/index.ts:31` | Performs Context7 HTTP requests with timeout and optional auth. |
+| `callApi` | function | `hindsight/index.ts:67` | Calls Hindsight bank endpoints for recall and retention. |
+| `callVelox` | function | `web-tools/index.ts:23` | Calls Velox search/fetch endpoints with timeout and optional auth. |
+| `run` | function | `skill-state/runner.ts:79` | SKILL.state loop; takes an injected `complete` so it can be driven by a stub. |
+| `execute` | function | `skill-state/executor.ts:162` | Executes one repo action; never throws, errors become observations. |
+| `merge` | function | `skill-state/state.ts:80` | Atomic `Σ ⊕ ΔΣ` with bound checks and rollback. |
+| `render` / `lastFencedJson` | functions | `skill-state/prompt.ts:32`, `:65` | Single-message prompt; parses the last fenced JSON block. |
+| `validateStepResponse` | function | `skill-state/schemas.ts:93` | TypeBox validation returning error paths that name offending keys. |
+| `loadSpec` | function | `skill-state/workflow.ts:35` | Built-in spec or `--skill` file, ≤ 4 KB. |
+| `saveCheckpoint` / `listCheckpoints` | functions | `skill-state/checkpoints.ts` | Per-cwd durable checkpoint files under the Pi agent dir. |
+| `stateRunTool` / `runStateRunTool` | functions | `skill-state/tool-registry.ts` | globalThis registry of sibling read-only tools; vocabulary, validation and execution for the `tool` action. |
+| `openRunLog` | function | `skill-state/runlog.ts` | Per-run JSONL trace (prompts, replies, rejections, states, observations) next to the checkpoints; `tools/runlog.ts` reads it. |
+| `spawnPane` / `listPanes` / `killPane` | functions | `subagents/tmux.ts` | tmux adapter over an injected `pi.exec`; session per root, first subagent is the first pane, tiled layout. |
+| `registerChild` | function | `subagents/child.ts` | Child-role hooks: result + status per settled turn, inbox poll, single fallback-model switch. |
+| `resolveType` / `resolveSkills` | functions | `subagents/types.ts` | Built-in type merged with `~/.pi/agent/subagents/<type>.md`; skill names → `--skill` paths. |
+| `listTree` / `updateTask` | functions | `subagents/state.ts` | File-per-task registry under the Pi agent dir, atomic writes, launch-tree helpers. |
 
 ## CONVENTIONS
-- Keep one directory per plugin under `extensions/`; use `index.ts` as the loader entry point and add a sibling README for a plugin contract.
+- Keep one directory per plugin under ``; use `index.ts` as the loader entry point and add a sibling README for a plugin contract.
 - Keep the default export a pi extension factory. Register tools/events through the provided `ExtensionAPI`; do not introduce a separate application entry point.
 - Runtime imports must resolve from pi's dependency tree (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai/compat`, `@earendil-works/pi-tui`, `typebox`) or Node built-ins. Plugins intentionally ship no `node_modules`.
 - Sibling imports omit the `.ts` extension (`from "./client"`); `allowImportingTsExtensions` is not enabled.
-- Read-only tools are registered as `pi.registerTool(stateRunTool({ ... }))` (`extensions/skill-state/tool-registry.ts`) so `/state-run` can call them; never wrap a tool that writes.
+- Read-only tools are registered as `pi.registerTool(stateRunTool({ ... }))` (`skill-state/tool-registry.ts`) so `/state-run` can call them; never wrap a tool that writes.
 - The installed `pi` binary may lag `node_modules` types (0.83.0 vs 0.84.2 at last check). Use APIs present in both; e.g. resolve auth with `ctx.modelRegistry.getApiKeyAndHeaders` and call `complete` from `@earendil-works/pi-ai/compat`, not `ctx.modelRegistry.complete`.
 - Use strict TypeScript with ES2022, ESNext, bundler resolution, and no emitted files. Match the existing direct string-concatenation style and typed TypeBox schemas when editing adjacent code.
 - External API clients use environment-selected base URLs, optional bearer tokens, `AbortSignal` cancellation/timeouts, and readable tool errors that preserve HTTP status in `details.status` where applicable.
@@ -116,6 +115,6 @@ bun run check
 
 ## NOTES
 - There is no test suite, CI workflow, formatter, or linter configuration in the repository; do not claim broader validation than `bun run check`. Behavioural checks for skill-state were ad-hoc `bun` scripts in a scratch directory, not committed.
-- To exercise an extension without the TUI: `pi --no-session -ne -nc -ns -np -e extensions/<plugin>/index.ts --mode json -p "/command args"`. Extension slash commands are dispatched in print mode, but `ui.notify` output is not rendered there; read `entry_appended` events instead.
+- To exercise an extension without the TUI: `pi --no-session -ne -nc -ns -np -e <plugin>/index.ts --mode json -p "/command args"`. Extension slash commands are dispatched in print mode, but `ui.notify` output is not rendered there; read `entry_appended` events instead.
 - `bun.lock` is intentionally ignored by the current repository configuration; preserve that policy unless explicitly changing dependency management.
 - `.omc/` and `.omo/` are ignored agent state. `.agents/plans/` is tracked documentation. `.codegraph` may be a local index link and is excluded by the repository's local git info exclude.

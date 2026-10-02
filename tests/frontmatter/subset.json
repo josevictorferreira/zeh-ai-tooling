@@ -1,0 +1,41 @@
+{
+  "attrs": {
+    "count": 3,
+    "description": "Systems \"architect\": long-term # not comment",
+    "empty": [],
+    "enable": false,
+    "fold": "folded text",
+    "list": [
+      "Bash(git *)",
+      "quoted: item"
+    ],
+    "lit": "line one\n  indented\n\nline three\n",
+    "mode": "primary",
+    "name": "architect",
+    "nothing": null,
+    "overrides": {
+      "opencode": {
+        "mode": "subagent",
+        "temperature": 0.2
+      }
+    },
+    "permission": {
+      "*": "ask",
+      "bash": {
+        "git *": "allow",
+        "rm": "deny"
+      }
+    },
+    "same-indent": [
+      "a",
+      "b"
+    ],
+    "temperature": 0.2,
+    "tools": [
+      "Read",
+      "Glob x",
+      "it's"
+    ]
+  },
+  "body": "# Body\n---\nmore\n"
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "my-claude-plugins",
-  "description": "Custom Claude Code plugins by josevictorferreira",
+  "name": "zeh-ai-tooling",
+  "description": "Custom Claude Code plugins from zeh-ai-tooling",
   "owner": {
     "name": "José Victor Ferreira",
     "email": "jose.ferreira@agrosmart.com.br"
@@ -10,9 +10,14 @@
     {
       "name": "voice",
       "description": "Speak the last agent reply (/speak) and dictate into the prompt (/dictate), via Velox",
-      "source": "./plugins/voice",
+      "source": "./voice",
       "category": "productivity",
-      "tags": ["tts", "stt", "voice", "velox"]
+      "tags": [
+        "tts",
+        "stt",
+        "voice",
+        "velox"
+      ]
     }
   ]
 }

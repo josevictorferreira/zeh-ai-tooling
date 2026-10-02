@@ -1,0 +1,8 @@
+description = "Agent used by the render snapshot tests"
+
+prompt = """
+# Sample Agent
+
+Run `{{args}}` and !{git status}, then {{args}}.
+
+"""

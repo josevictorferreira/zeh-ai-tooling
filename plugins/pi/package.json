@@ -1,13 +1,9 @@
 {
-  "name": "my-pi-agent-plugins",
+  "name": "zeh-ai-tooling-pi-extensions",
   "version": "0.1.0",
-  "description": "Custom extensions for the pi coding agent",
-  "repository": "github:josevictorferreira/my-pi-agent-plugins",
+  "description": "Custom extensions for the pi coding agent (installed by the zeh-ai-tooling flake)",
+  "repository": "github:josevictorferreira/zeh-ai-tooling",
   "license": "MIT",
-  "keywords": ["pi-package"],
-  "pi": {
-    "extensions": ["./extensions"]
-  },
   "scripts": {
     "check": "tsc --noEmit"
   },

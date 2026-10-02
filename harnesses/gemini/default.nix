@@ -1,0 +1,152 @@
+# Harness: Gemini CLI, installed from npm with an auto-update wrapper.
+{ isDarwin }:
+{ config
+, lib
+, pkgs
+, ...
+}:
+let
+  # Import default settings generator
+  mkDefaultSettings = import ./settings.nix;
+
+      zeh = import ../../nix/lib { inherit lib pkgs; };
+
+      cfg = config.zeh.ai.harnesses.gemini;
+
+      geminiFHS =
+        if !isDarwin then
+          pkgs.buildFHSEnv
+            {
+              name = "gemini-cli-fhs";
+              targetPkgs = pkgs: [
+                pkgs.stdenv.cc.cc.lib
+                pkgs.zlib
+                pkgs.openssl
+                pkgs.nodejs
+                pkgs.ripgrep
+                pkgs.coreutils
+              ];
+              profile = ''
+                export TMPDIR="''${TMPDIR:-$HOME/.cache/gemini-tmp}"
+                mkdir -p "$TMPDIR"
+              '';
+              runScript = "${pkgs.writeShellScript "gemini-cli-runner" ''
+              exec "$HOME/.npm-global/bin/gemini" "$@"
+            ''}";
+            }
+        else
+          null;
+
+      npmPrefix = "$HOME/.npm-global";
+      geminiPackage = "@google/gemini-cli@nightly";
+
+      shellScriptBin = pkgs.writeShellScriptBin "gemini" ''
+        set -euo pipefail
+
+        export PATH="${lib.makeBinPath [ pkgs.nodejs ]}:$PATH"
+        NPM_PREFIX="${npmPrefix}"
+        NPM_BIN="$NPM_PREFIX/bin"
+        GEMINI_BIN_DIR="$HOME/.gemini/bin"
+        VERSION_FILE="$NPM_PREFIX/.gemini-cli-version"
+
+        # Setup npm global prefix in home directory
+        mkdir -p "$NPM_PREFIX"
+        mkdir -p "$GEMINI_BIN_DIR"
+        ${pkgs.nodejs}/bin/npm config set prefix "$NPM_PREFIX" 2>/dev/null || true
+
+        # Symlink ripgrep if needed
+        if [ ! -e "$GEMINI_BIN_DIR/rg" ]; then
+          ln -sf "${pkgs.ripgrep}/bin/rg" "$GEMINI_BIN_DIR/rg"
+        fi
+
+        # Get latest available version
+        LATEST_VERSION=$(${pkgs.nodejs}/bin/npm view "${geminiPackage}" version 2>/dev/null || echo "unknown")
+
+        # Get currently installed version
+        CURRENT_VERSION=""
+        if [ -f "$VERSION_FILE" ]; then
+          CURRENT_VERSION=$(cat "$VERSION_FILE")
+        fi
+
+        # Install or update if version changed or not installed
+        if [ ! -x "$NPM_BIN/gemini" ] || [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+          echo "Installing/updating gemini-cli (${geminiPackage})..."
+          echo "  Current: ''${CURRENT_VERSION:-not installed}"
+          echo "  Latest:  $LATEST_VERSION"
+          ${pkgs.nodejs}/bin/npm install -g "${geminiPackage}"
+          echo "$LATEST_VERSION" > "$VERSION_FILE"
+        fi
+
+        export PATH="$NPM_BIN:$GEMINI_BIN_DIR:$PATH"
+        ${
+          if !isDarwin then
+            ''
+              exec "${geminiFHS}/bin/gemini-cli-fhs" "$@"
+            ''
+          else
+            ''
+              exec "$NPM_BIN/gemini" "$@"
+            ''
+        }
+      '';
+      # Build .gemini config directory as a derivation for jvf.home
+      geminiConfigs =
+        (zeh.render.mkGeminiTomlConfigs (cfg.commands // cfg.agents))
+        // (zeh.render.mkSkillConfigs cfg.skills)
+        // (lib.optionalAttrs (cfg.settings != { }) {
+          "settings.json" = cfg.settings;
+        })
+        // {
+          "GEMINI.md" = cfg.baseRules;
+        };
+
+      geminiConfigDir = zeh.files.mkConfigDir
+        {
+          name = "gemini-config";
+          prefix = "gemini";
+        }
+        geminiConfigs;
+    in
+    {
+      imports = [ ./options.nix ];
+
+      config = lib.mkMerge [
+        {
+        # Set default settings using imported generator
+        zeh.ai.harnesses.gemini.settings = lib.mkDefault (mkDefaultSettings {
+          inherit (cfg) mcps;
+        });
+        }
+
+        (lib.mkIf cfg.enable {
+        # GEMINI_API_KEY comes from the consumer's secret environment.
+        zeh.ai.wrappers.gemini = {
+          packages = [
+            shellScriptBin
+          ];
+          env = {
+            GEMINI_YOLO_MODE = "true";
+          };
+        };
+        zeh.ai.home.".gemini" = {
+          kind = "dir";
+          mode = "copy";
+          source = geminiConfigDir;
+          preserve = [
+            "antigravity"
+            "history"
+            "tmp"
+            "google_accounts.json"
+            "oauth_creds.json"
+            "trustedFolders.json"
+            "credentials.json"
+            "state.json"
+            "auth.json"
+            "cookies.json"
+            ".env"
+            "installation_id"
+          ];
+        };
+        })
+      ];
+    }

@@ -5,7 +5,7 @@
   "author": {
     "name": "José Victor Ferreira"
   },
-  "repository": "https://github.com/josevictorferreira/my-claude-plugins",
+  "repository": "https://github.com/josevictorferreira/zeh-ai-tooling",
   "license": "MIT",
   "keywords": ["tts", "stt", "voice", "velox", "speech"],
   "commands": "./commands/",
