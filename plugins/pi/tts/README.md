@@ -1,0 +1,49 @@
+# tts
+
+Summarizes the last agent reply and plays it as speech. Pure user-facing
+convenience: no tools, nothing enters the LLM conversation.
+
+## Usage
+
+- `/speak` — summarize the last assistant message and speak it. Invoking it
+  again while busy stops the current playback.
+- `ctrl+alt+s` — same action.
+- Auto mode: set `TTS_AUTO_SPEAK=1` to speak automatically every time the agent
+  stops (reply finished, question asked, or run aborted). A brief chime alert
+  plays right before auto-speaking. A new reply cuts off any playback still in
+  progress. `/speak` still works as a manual stop.
+
+## Behavior
+
+1. Reads the latest assistant text from the current session branch.
+2. The reply is summarized into 2–3 spoken sentences via Velox
+   `POST /v1/chat/completions`, written in `TTS_LANGUAGE`, so a reply in
+   another language is translated before it is spoken.
+3. The summary is prefixed with the session label: the name set with
+   `/name`, or the project directory name when the session is unnamed.
+4. Speech is synthesized with Velox `POST /v1/audio/speech` (wav), cached
+   in a temp file keyed by the message ID, session label and configuration, and played
+   locally. Re-running `/speak` on the same message reuses the cached audio
+   without making summarization or TTS API calls. Cached files are cleaned up on
+   session shutdown or process exit.
+5. No-op without a UI (print/json modes). Playback is aborted on
+   `session_shutdown`.
+
+## Environment variables
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `VELOX_API_URL` | `https://velox.josevictor.me` | Velox base URL (shared with web-tools) |
+| `VELOX_API_KEY` | — | required bearer token |
+| `TTS_MODEL` | `voice` | speech combo/model alias (velox `[combos.voice]`: speechify-tts, then elevenlabs-tts) |
+| `TTS_VOICE` | `gwen` | canonical velox combo voice name; velox maps it to a native voice per language (gwen: harper_32 in English, luana in pt-BR). A raw provider id not in the combo table is dropped and falls back to the provider default |
+| `TTS_SUMMARY_MODEL` | `deepseek-v4-flash` | chat model alias for the summary |
+| `TTS_LANGUAGE` | `pt-BR` | spoken language — the summary is written in it and it is sent to the speech endpoint |
+| `TTS_AUTO_SPEAK` | off | `1`/`true` speaks every reply automatically when the agent stops |
+| `TTS_PLAYER` | auto-detect | explicit player command, e.g. `mpv --no-video --really-quiet` |
+
+## Player detection
+
+`TTS_PLAYER` (split on whitespace) if set; otherwise the first available of
+`mpv --no-video --really-quiet`, `ffplay -nodisp -autoexit -loglevel quiet`,
+`pw-play`.
