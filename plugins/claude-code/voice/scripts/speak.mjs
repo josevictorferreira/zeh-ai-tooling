@@ -8,8 +8,9 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
-import { findCommand, veloxPost, wav } from "./velox.mjs";
+import { basename, dirname, join } from "node:path";
+import { stopSession } from "./queue.mjs";
+import { PLAYERS, findCommand, veloxPost, wav } from "./velox.mjs";
 
 const TTS_MODEL = () => process.env.TTS_MODEL || "voice";
 const TTS_VOICE = () => process.env.TTS_VOICE || "stone";
@@ -24,14 +25,7 @@ const SUMMARY_PROMPT =
   "Summarize the assistant message below for text-to-speech in 2-3 plain " +
   "spoken sentences. No markdown, no code, no lists, no file paths.";
 
-const PLAYERS = {
-  mpv: ["--no-video", "--really-quiet"],
-  ffplay: ["-nodisp", "-autoexit", "-loglevel", "quiet"],
-  "pw-play": [],
-};
-
 const STATE_DIR = join(tmpdir(), "claude-voice-" + (process.getuid?.() ?? 0));
-const PID_FILE = join(STATE_DIR, "play.pid");
 const LOG_FILE = join(STATE_DIR, "speak.log");
 
 // --- transcript -------------------------------------------------------------
@@ -47,6 +41,11 @@ function currentTranscript() {
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
   if (!newest) throw "no transcript found for " + process.cwd();
   return newest;
+}
+
+/** Queue session tag: the transcript file name is the session id. */
+function sessionTag(transcriptPath) {
+  return "cc-" + basename(transcriptPath, ".jsonl");
 }
 
 /** Latest assistant text on the main thread, with the uuid that keys its cache entry. */
@@ -107,33 +106,20 @@ async function synthesize(input) {
 
 // --- playback ---------------------------------------------------------------
 
-/** Kill a running playback group, if any. Returns whether one was running. */
-function stopPlayback() {
-  if (!existsSync(PID_FILE)) return false;
-  const pid = Number(readFileSync(PID_FILE, "utf8").trim());
-  unlinkSync(PID_FILE);
-  if (!pid) return false;
-  try {
-    process.kill(-pid, "SIGTERM"); // detached child leads its own group
-    return true;
-  } catch {
-    return false; // already gone
-  }
-}
-
 /**
- * Play files in order, detached, and record the group id so a later run can
- * stop it. Returning immediately is what makes /speak a toggle: the command
- * finishes while the audio is still playing.
+ * Hand the files to a detached play.mjs worker, which waits for the shared
+ * queue (see queue.mjs) and plays them in order. Returning immediately is what
+ * makes /speak a toggle: the command finishes while the audio is still playing.
+ * The worker replaces any earlier playback of the same session.
  */
-async function playDetached(files) {
-  const { cmd, args } = await findCommand(process.env.TTS_PLAYER, PLAYERS, "TTS_PLAYER").catch((err) => {
-    throw typeof err === "string" && err.startsWith("none found") ? "no audio player found (tried mpv, ffplay, pw-play)" : err;
+async function playDetached(files, session) {
+  // Resolve the player here so a missing one is reported to the user.
+  await findCommand(process.env.TTS_PLAYER, PLAYERS, "TTS_PLAYER").catch((err) => {
+    throw typeof err === "string" && err.startsWith("none found") ? "no audio player found (tried " + Object.keys(PLAYERS).join(", ") + ")" : err;
   });
-  const script = files.map((f) => [cmd, ...args, f].map((p) => "'" + p.replaceAll("'", "'\\''") + "'").join(" ")).join("; ");
-  const child = spawn("sh", ["-c", script], { detached: true, stdio: "ignore" });
+  const worker = join(dirname(fileURLToPath(import.meta.url)), "play.mjs");
+  const child = spawn(process.execPath, [worker, "--session", session, ...files], { detached: true, stdio: "ignore" });
   child.unref();
-  writeFileSync(PID_FILE, String(child.pid));
 }
 
 /** Rising 120 ms chime (700 Hz -> 1050 Hz), written once per machine boot. */
@@ -177,7 +163,7 @@ async function speak({ transcriptPath, auto }) {
     writeFileSync(file, await synthesize(await summarize(msg.text)));
   }
 
-  await playDetached(auto ? [chimeFile(), file] : [file]);
+  await playDetached(auto ? [chimeFile(), file] : [file], sessionTag(transcriptPath));
   return cached ? "speaking (cached)" : "speaking";
 }
 
@@ -185,9 +171,10 @@ async function main() {
   const auto = process.argv.includes("--auto");
   mkdirSync(STATE_DIR, { recursive: true });
 
-  // SessionEnd: silence anything still playing and drop the cached audio.
+  // SessionEnd: silence this session's playback and drop the cached audio.
   if (process.argv.includes("--cleanup")) {
-    stopPlayback();
+    const hook = JSON.parse((await readStdin()) || "{}");
+    if (hook.transcript_path) stopSession(sessionTag(hook.transcript_path));
     for (const f of readdirSync(STATE_DIR).filter((f) => f.endsWith(".wav"))) {
       try {
         unlinkSync(join(STATE_DIR, f));
@@ -199,9 +186,10 @@ async function main() {
   }
 
   if (!auto) {
-    // A second /speak stops playback instead of queueing another one.
-    if (stopPlayback()) return console.log("tts: stopped");
-    console.log("tts: " + (await speak({ transcriptPath: currentTranscript(), auto: false })));
+    // A second /speak stops this session's playback instead of queueing another one.
+    const transcriptPath = currentTranscript();
+    if (stopSession(sessionTag(transcriptPath))) return console.log("tts: stopped");
+    console.log("tts: " + (await speak({ transcriptPath, auto: false })));
     return;
   }
 
@@ -222,7 +210,7 @@ async function main() {
     return;
   }
 
-  stopPlayback(); // a new reply supersedes whatever is still playing
+  // The worker drops this session's earlier playback; other sessions queue.
   await speak({ transcriptPath: hook.transcript_path || currentTranscript(), auto: true });
 }
 

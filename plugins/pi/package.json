@@ -5,7 +5,8 @@
   "repository": "github:josevictorferreira/zeh-ai-tooling",
   "license": "MIT",
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --test '*/*.test.ts'"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "latest",

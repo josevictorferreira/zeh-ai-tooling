@@ -10,8 +10,8 @@ convenience: no tools, nothing enters the LLM conversation.
 - `ctrl+alt+s` — same action.
 - Auto mode: set `TTS_AUTO_SPEAK=1` to speak automatically every time the agent
   stops (reply finished, question asked, or run aborted). A brief chime alert
-  plays right before auto-speaking. A new reply cuts off any playback still in
-  progress. `/speak` still works as a manual stop.
+  plays right before auto-speaking. A new reply cuts off this session's own
+  playback still in progress. `/speak` still works as a manual stop.
 
 ## Behavior
 
@@ -26,8 +26,29 @@ convenience: no tools, nothing enters the LLM conversation.
    locally. Re-running `/speak` on the same message reuses the cached audio
    without making summarization or TTS API calls. Cached files are cleaned up on
    session shutdown or process exit.
-5. No-op without a UI (print/json modes). Playback is aborted on
+5. Playback waits for its turn in a queue shared with every other pi and
+   Claude Code session of the user (see below), so two agents never talk over
+   each other. The status bar shows `queued…` while waiting.
+6. No-op without a UI (print/json modes). Playback is aborted on
    `session_shutdown`.
+
+## Playback queue
+
+The same protocol is implemented by the Claude Code `voice` plugin
+(`plugins/claude-code/voice/scripts/queue.mjs`); both must agree on it.
+
+- Directory: `TTS_QUEUE_DIR`, else `$XDG_RUNTIME_DIR/tts-queue` on Linux, else
+  `<tmpdir>/tts-queue-<uid>`.
+- One empty ticket file per playback, created atomically, named
+  `<ms13>-<pid>-<session>`. Lexical order is arrival order; the holder pid
+  must stay alive for the whole playback (here: the pi process). The session
+  tag is `pi-<pid>`.
+- A waiter polls every 200 ms. Tickets ahead of it whose pid is dead are
+  pruned, so a crashed holder never blocks the queue.
+- Before enqueueing, any ticket of the same session is dropped: a new reply
+  replaces this session's pending or playing item and nothing else. Other
+  sessions are queued first come, first served.
+- The chime and the speech play under one ticket, so nothing slips in between.
 
 ## Environment variables
 
@@ -41,9 +62,14 @@ convenience: no tools, nothing enters the LLM conversation.
 | `TTS_LANGUAGE` | `pt-BR` | spoken language — the summary is written in it and it is sent to the speech endpoint |
 | `TTS_AUTO_SPEAK` | off | `1`/`true` speaks every reply automatically when the agent stops |
 | `TTS_PLAYER` | auto-detect | explicit player command, e.g. `mpv --no-video --really-quiet` |
+| `TTS_QUEUE_DIR` | see above | directory of the playback queue shared with Claude Code |
 
 ## Player detection
 
 `TTS_PLAYER` (split on whitespace) if set; otherwise the first available of
 `mpv --no-video --really-quiet`, `ffplay -nodisp -autoexit -loglevel quiet`,
-`pw-play`.
+`afplay` (macOS built-in), `pw-play`.
+
+## Tests
+
+`bun run test` runs the queue's pure ordering logic under `node --test`.

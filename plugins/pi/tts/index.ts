@@ -4,6 +4,7 @@ import { access, unlink, writeFile } from "node:fs/promises";
 import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { acquire, releaseAllSync } from "./queue";
 
 const DEFAULT_API_URL = "https://velox.josevictor.me";
 
@@ -150,6 +151,7 @@ async function canExecute(bin: string): Promise<boolean> {
 const PLAYER_ARGS: Record<string, string[]> = {
   mpv: ["--no-video", "--really-quiet"],
   ffplay: ["-nodisp", "-autoexit", "-loglevel", "quiet"],
+  afplay: [], // macOS built-in
   "pw-play": [],
 };
 
@@ -164,7 +166,7 @@ async function findPlayer(): Promise<{ cmd: string; args: string[] }> {
   for (const bin of Object.keys(PLAYER_ARGS)) {
     if (await canExecute(bin)) return { cmd: bin, args: PLAYER_ARGS[bin] };
   }
-  throw "no audio player found (tried mpv, ffplay, pw-play)";
+  throw "no audio player found (tried " + Object.keys(PLAYER_ARGS).join(", ") + ")";
 }
 
 /** Play an audio file; resolves on close; killed on abort. */
@@ -339,21 +341,29 @@ async function speakLastMessage(ctx: ExtensionContext): Promise<void> {
   await startSpeaking(ctx);
 }
 
-/** Auto trigger: a new reply supersedes anything still playing. */
+/** Auto trigger: a new reply supersedes this session's own playback. */
 async function autoSpeak(ctx: ExtensionContext): Promise<void> {
   if (!AUTO_SPEAK() || !ctx.hasUI) return;
   stopCurrent();
-  try {
-    const alertFile = await getAlertSoundFile();
-    const alertController = new AbortController();
-    await play(alertFile, alertController.signal);
-  } catch {
-    // Alert playback error should not block speaking
-  }
-  await startSpeaking(ctx);
+  await startSpeaking(ctx, true);
 }
 
-async function startSpeaking(ctx: ExtensionContext): Promise<void> {
+/**
+ * Wait for this session's turn in the playback queue shared with every other
+ * pi and Claude Code session, then play the files in order under one ticket.
+ */
+async function speakFiles(ctx: ExtensionContext, files: string[], signal: AbortSignal): Promise<void> {
+  const release = await acquire("pi-" + process.pid, signal, () => ctx.ui.setStatus("tts", "queued…"));
+  const stopWave = startWave(ctx);
+  try {
+    for (const file of files) await play(file, signal);
+  } finally {
+    stopWave();
+    await release();
+  }
+}
+
+async function startSpeaking(ctx: ExtensionContext, chime = false): Promise<void> {
   const msg = lastAssistantMessage(ctx);
   if (!msg) {
     ctx.ui.notify("tts: no assistant message yet", "warning");
@@ -363,21 +373,27 @@ async function startSpeaking(ctx: ExtensionContext): Promise<void> {
   const label = sessionLabel(ctx);
   const cacheKey = `${msg.id}:${label}:${TTS_MODEL()}:${TTS_VOICE()}:${SUMMARY_MODEL()}:${TTS_LANGUAGE()}`;
   const controller = new AbortController();
+  // The chime shares the ticket with the speech so nothing can play in between.
+  const prelude: string[] = [];
+  if (chime) {
+    try {
+      prelude.push(await getAlertSoundFile());
+    } catch {
+      // A missing chime should not block speaking.
+    }
+  }
 
   const cachedFile = await getCachedAudio(cacheKey);
   if (cachedFile) {
     const run = { controller, file: cachedFile };
     current = run;
-    let stopWave: (() => void) | undefined;
     try {
-      stopWave = startWave(ctx);
-      await play(cachedFile, controller.signal);
+      await speakFiles(ctx, prelude.concat(cachedFile), controller.signal);
     } catch (err) {
       if (String(err) !== "aborted" && !controller.signal.aborted) {
         ctx.ui.notify("tts: " + String(err), "error");
       }
     } finally {
-      stopWave?.();
       if (current === run) {
         current = undefined;
         ctx.ui.setStatus("tts", undefined);
@@ -392,7 +408,6 @@ async function startSpeaking(ctx: ExtensionContext): Promise<void> {
   current = run;
 
   let cached = false;
-  let stopWave: (() => void) | undefined;
   try {
     ctx.ui.setStatus("tts", "summarizing…");
     const summary = await summarize(msg.text, controller.signal);
@@ -404,14 +419,12 @@ async function startSpeaking(ctx: ExtensionContext): Promise<void> {
     cacheAudio(cacheKey, file);
     cached = true;
 
-    stopWave = startWave(ctx);
-    await play(file, controller.signal);
+    await speakFiles(ctx, prelude.concat(file), controller.signal);
   } catch (err) {
     if (String(err) !== "aborted" && !controller.signal.aborted) {
       ctx.ui.notify("tts: " + String(err), "error");
     }
   } finally {
-    stopWave?.();
     if (!cached) {
       await unlink(file).catch(() => {});
     }
@@ -447,5 +460,8 @@ export default function (pi: ExtensionAPI) {
     cleanupFiles();
   });
 
-  process.on("exit", () => cleanupFiles());
+  process.on("exit", () => {
+    releaseAllSync();
+    cleanupFiles();
+  });
 }

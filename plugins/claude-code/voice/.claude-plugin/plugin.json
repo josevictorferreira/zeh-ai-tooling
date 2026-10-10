@@ -1,13 +1,19 @@
 {
   "name": "voice",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Text-to-speech for agent replies and microphone dictation, through Velox",
   "author": {
-    "name": "José Victor Ferreira"
+    "name": "Jos\u00e9 Victor Ferreira"
   },
   "repository": "https://github.com/josevictorferreira/zeh-ai-tooling",
   "license": "MIT",
-  "keywords": ["tts", "stt", "voice", "velox", "speech"],
+  "keywords": [
+    "tts",
+    "stt",
+    "voice",
+    "velox",
+    "speech"
+  ],
   "commands": "./commands/",
   "hooks": "./hooks/hooks.json"
 }

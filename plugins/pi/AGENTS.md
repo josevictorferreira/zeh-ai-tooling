@@ -18,7 +18,7 @@ plugins/pi/
 ├── skill-state/    # SKILL.state runtime: /state-run bounded-state agent loop
 ├── stt/            # microphone dictation into the prompt via Velox
 ├── subagents/      # tmux-pane subagents: launch/check/send/close tools, steer hand-back
-├── tts/            # spoken summary of the last reply via Velox
+├── tts/            # spoken summary of the last reply via Velox; cross-harness playback queue
 ├── web-tools/      # Velox web search and URL extraction
 ├── .agents/plans/  # tracked design plans
 ├── .agents/specs/  # reviewed implementation specs (skill-state, notify)
@@ -37,7 +37,7 @@ plugins/pi/
 | Change server catalog/config merging | `lsp/servers.ts` | Built-ins, trusted project config, root discovery, validation. |
 | Change package/typechecking setup | `package.json`, `tsconfig.json` | Only script is `bun run check`; compiler includes `extensions`. |
 | Understand installation/loading | `README.md`, `package.json` | `pi.extensions` points at `./extensions`; plugins ship without local dependencies. |
-| Understand or change the spoken-summary flow | `tts/index.ts` | `/speak` command and `ctrl+alt+s` shortcut; Velox chat summary + audio speech, local playback. |
+| Understand or change the spoken-summary flow | `tts/index.ts`, `tts/queue.ts` | `/speak` command and `ctrl+alt+s` shortcut; Velox chat summary + audio speech, local playback behind a ticket-file queue shared with the Claude Code voice plugin (`.agents/specs/0002-tts-queue`). |
 | Understand or change the dictation flow | `stt/index.ts` | `/dictate` command and `ctrl+alt+d` shortcut; local recording via `pw-record`/`ffmpeg`, Velox transcription, transcript appended to the prompt editor. |
 | Understand or change desktop notifications | `notify/index.ts`, `.agents/specs/0002-notify/plan.md` | Classifies `agent_settled` outcomes into success/question/error; sends a `notify-send`-style argv via `pi.exec` with a 5 s timeout; dedupes by assistant message id. |
 | Understand the SKILL.state design and its limits | `.agents/specs/0001-skill-state-plan.md`, `skill-state/README.md` | Paper claims vs. what is reproduced; verification gates; honesty notes. |

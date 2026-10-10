@@ -24,9 +24,33 @@ Nothing either command produces enters the LLM conversation as an instruction.
    the cached audio without calling either API again.
 
 **Auto mode:** set `TTS_AUTO_SPEAK=1` and every settled reply is spoken
-automatically, preceded by a short rising chime. A new reply cuts off anything
-still playing. `/speak` still works as a manual stop. When it is off the Stop
-hook exits immediately and costs nothing.
+automatically, preceded by a short rising chime. A new reply cuts off this
+session's own playback; other sessions are not touched. `/speak` still works
+as a manual stop. When it is off the Stop hook exits immediately and costs
+nothing.
+
+### Playback queue
+
+Playback waits for its turn in a queue shared with every other Claude Code and
+pi session of the user, so two agents never talk over each other. The same
+protocol lives in the pi `tts` extension (`plugins/pi/tts/queue.ts`); both
+must agree on it.
+
+- Directory: `TTS_QUEUE_DIR`, else `$XDG_RUNTIME_DIR/tts-queue` on Linux, else
+  `<tmpdir>/tts-queue-<uid>`.
+- One empty ticket file per playback, created atomically, named
+  `<ms13>-<pid>-<session>`. Lexical order is arrival order; the holder pid
+  must stay alive for the whole playback. Here that is a detached
+  `scripts/play.mjs` worker, one per request, so the hook or command returns
+  at once. The session tag is `cc-<transcript file name>`, which is the
+  session id.
+- A waiter polls every 200 ms. Tickets ahead of it whose pid is dead are
+  pruned, so a crashed holder never blocks the queue.
+- Before enqueueing, any ticket of the same session is dropped and its worker
+  terminated: a new reply replaces this session's pending or playing item and
+  nothing else. `/speak` as a stop does the same. Other sessions are queued
+  first come, first served.
+- The chime and the speech play under one ticket, so nothing slips in between.
 
 ## /dictate
 
@@ -55,6 +79,7 @@ Whisper-class models hallucinate on silence.
 | `TTS_LANGUAGE` | `pt-BR` | spoken language — the summary is written in it and it is sent to the speech endpoint |
 | `TTS_AUTO_SPEAK` | off | `1`/`true` speaks every reply automatically |
 | `TTS_PLAYER` | auto-detect | explicit player command, e.g. `mpv --no-video --really-quiet` |
+| `TTS_QUEUE_DIR` | see above | directory of the playback queue shared with pi |
 | `STT_MODEL` | `stt-1` | transcription combo (elevenlabs-stt) |
 | `STT_LANGUAGE` | unset (auto-detect) | ISO-639-1 code sent as `language` |
 | `STT_RECORDER` | auto-detect | recorder command; must write raw PCM to stdout |
@@ -71,12 +96,18 @@ Whisper-class models hallucinate on silence.
 
 | Role | Tried in order |
 | --- | --- |
-| Player | `mpv --no-video --really-quiet`, `ffplay -nodisp -autoexit -loglevel quiet`, `pw-play` |
+| Player | `mpv --no-video --really-quiet`, `ffplay -nodisp -autoexit -loglevel quiet`, `afplay` (macOS built-in), `pw-play` |
 | Recorder | `pw-record --raw --rate 16000 --channels 1 --format s16 -`, `ffmpeg -f pulse -i default -ac 1 -ar 16000 -f s16le -` |
 | Clipboard | `wl-copy`, `xclip -selection clipboard`, `xsel --clipboard --input`, `pbcopy` |
 
 The recorder must emit **raw s16le mono 16 kHz PCM on stdout** — no container,
 no output file. Node is the only runtime dependency, and Claude Code ships it.
+
+## Tests
+
+```sh
+node --test voice/scripts/queue.test.mjs
+```
 
 ## Differences from the pi extensions
 

@@ -327,10 +327,7 @@ ultimate-browsing runtime. All match, except:
 
 ### Remaining steps (outward-facing, not done)
 
-1. Create `github.com/josevictorferreira/zeh-ai-tooling` and push `main`.
-2. In `~/.config/nix/flake.nix`, switch `zeh-ai-tooling.url` from
-   `git+file:///home/josevictor/Workspace/zeh-ai-tooling` to
-   `github:josevictorferreira/zeh-ai-tooling`, then `nix flake update zeh-ai-tooling`.
-   zeh-mac needs this, because it has no local checkout at that path.
+1. ~~Create `github.com/josevictorferreira/zeh-ai-tooling` and push `main`.~~ Done.
+2. ~~Switch `zeh-ai-tooling.url` to `github:josevictorferreira/zeh-ai-tooling`.~~ Done; locked at `5d6289b`.
 3. `nixos-rebuild switch` on zeh-pc; `darwin-rebuild switch` on zeh-mac.
 4. Archive `my-pi-agent-plugins` and `my-claude-plugins` with a README pointer here.

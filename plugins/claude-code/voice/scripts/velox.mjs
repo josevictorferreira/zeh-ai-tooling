@@ -4,6 +4,14 @@ import { constants } from "node:fs";
 
 const DEFAULT_API_URL = "https://velox.josevictor.me";
 
+/** Audio players in preference order; afplay is the macOS built-in. */
+export const PLAYERS = {
+  mpv: ["--no-video", "--really-quiet"],
+  ffplay: ["-nodisp", "-autoexit", "-loglevel", "quiet"],
+  afplay: [],
+  "pw-play": [],
+};
+
 export function apiUrl() {
   return (process.env.VELOX_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
 }
