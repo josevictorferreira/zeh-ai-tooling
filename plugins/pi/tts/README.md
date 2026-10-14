@@ -16,9 +16,11 @@ convenience: no tools, nothing enters the LLM conversation.
 ## Behavior
 
 1. Reads the latest assistant text from the current session branch.
-2. The reply is summarized into 2–3 spoken sentences via Velox
+2. Only that step is summarized into 1–3 spoken sentences via Velox
    `POST /v1/chat/completions`, written in `TTS_LANGUAGE`, so a reply in
-   another language is translated before it is spoken.
+   another language is translated before it is spoken. The last few user
+   and assistant turns go along as context so references make sense; they
+   are not recapped.
 3. The summary is prefixed with the session label: the name set with
    `/name`, or the project directory name when the session is unnamed.
 4. Speech is synthesized with Velox `POST /v1/audio/speech` (wav), cached

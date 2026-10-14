@@ -21,9 +21,18 @@ const AUTO_SPEAK = () => /^(1|true|yes|on)$/i.test(process.env.TTS_AUTO_SPEAK ||
 // /v1/audio/speech rejects input above 4096 chars; stay under it.
 const MAX_SPEECH_CHARS = 4000;
 
+// Earlier turns sent along so the summary can resolve references.
+const CONTEXT_MESSAGES = 4;
+const CONTEXT_CHARS = 6000;
+
 const SUMMARY_PROMPT =
-  "Summarize the assistant message below for text-to-speech in 2-3 plain " +
-  "spoken sentences. No markdown, no code, no lists, no file paths.";
+  "You turn a coding assistant's latest message into a short spoken update " +
+  "for text-to-speech. Say only what the latest message tells the user right " +
+  "now: what was just done or found, and any question or decision left for " +
+  "them. Use the earlier conversation only to understand what the latest " +
+  "message refers to; never recap it. If the latest message recaps the whole " +
+  "session, keep only its outcome and what is new. 1-3 short, casual spoken " +
+  "sentences, like telling a colleague. No markdown, no code, no lists, no file paths.";
 
 const STATE_DIR = join(tmpdir(), "claude-voice-" + (process.getuid?.() ?? 0));
 const LOG_FILE = join(STATE_DIR, "speak.log");
@@ -48,10 +57,29 @@ function sessionTag(transcriptPath) {
   return "cc-" + basename(transcriptPath, ".jsonl");
 }
 
-/** Latest assistant text on the main thread, with the uuid that keys its cache entry. */
+/** Plain text of a main-thread user prompt or assistant reply, else "". */
+function entryText(entry) {
+  // Subagent replies and injected meta prompts are not what the user read.
+  if ((entry?.type !== "assistant" && entry?.type !== "user") || entry.isSidechain || entry.isMeta) return "";
+  const content = entry.message?.content;
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.filter((b) => b?.type === "text" && typeof b.text === "string").map((b) => b.text).join("\n").trim()
+      : "";
+  // Tags mark harness output (command echoes, reminders), not conversation.
+  return entry.type === "user" && text.trimStart().startsWith("<") ? "" : text;
+}
+
+/**
+ * Latest assistant text on the main thread, with the uuid that keys its cache
+ * entry and the few turns before it as context.
+ */
 function lastAssistantMessage(path) {
   const lines = readFileSync(path, "utf8").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
+  let msg;
+  const context = [];
+  for (let i = lines.length - 1; i >= 0 && context.length < CONTEXT_MESSAGES; i--) {
     if (!lines[i].trim()) continue;
     let entry;
     try {
@@ -59,28 +87,32 @@ function lastAssistantMessage(path) {
     } catch {
       continue; // partially flushed line
     }
-    // Subagent replies are not what the user just read on screen.
-    if (entry?.type !== "assistant" || entry.isSidechain) continue;
-    const content = entry.message?.content;
-    const text = typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.filter((b) => b?.type === "text" && typeof b.text === "string").map((b) => b.text).join("\n").trim()
-        : "";
-    if (text) return { id: entry.uuid || createHash("sha1").update(text).digest("hex"), text };
+    const text = entryText(entry);
+    if (!text) continue;
+    if (!msg) {
+      if (entry.type !== "assistant") continue;
+      msg = { id: entry.uuid || createHash("sha1").update(text).digest("hex"), text };
+    } else {
+      context.unshift((entry.type === "user" ? "User: " : "Assistant: ") + text);
+    }
   }
-  return undefined;
+  return msg && { ...msg, context: context.join("\n\n").slice(-CONTEXT_CHARS) };
 }
 
 // --- velox ------------------------------------------------------------------
 
-async function summarize(text) {
+function summaryInput(text, context) {
+  const latest = "Latest message (speak this):\n" + text.slice(0, 20000);
+  return context ? "Earlier conversation (context only):\n" + context + "\n\n" + latest : latest;
+}
+
+async function summarize({ text, context }) {
   const response = await veloxPost("/v1/chat/completions", {
     json: {
       model: SUMMARY_MODEL(),
       messages: [
         { role: "system", content: SUMMARY_PROMPT + " Write the summary in " + TTS_LANGUAGE() + "." },
-        { role: "user", content: text.slice(0, 20000) },
+        { role: "user", content: summaryInput(text, context) },
       ],
       max_tokens: 200,
     },
@@ -160,7 +192,7 @@ async function speak({ transcriptPath, auto }) {
 
   let cached = existsSync(file);
   if (!cached) {
-    writeFileSync(file, await synthesize(await summarize(msg.text)));
+    writeFileSync(file, await synthesize(await summarize(msg)));
   }
 
   await playDetached(auto ? [chimeFile(), file] : [file], sessionTag(transcriptPath));

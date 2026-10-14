@@ -17,9 +17,18 @@ const AUTO_SPEAK = () => /^(1|true|yes|on)$/i.test(process.env.TTS_AUTO_SPEAK ||
 // /v1/audio/speech rejects input above 4096 chars; stay under it.
 const MAX_SPEECH_CHARS = 4000;
 
+// Earlier turns sent along so the summary can resolve references.
+const CONTEXT_MESSAGES = 4;
+const CONTEXT_CHARS = 6000;
+
 const SUMMARY_PROMPT =
-  "Summarize the assistant message below for text-to-speech in 2-3 plain " +
-  "spoken sentences. No markdown, no code, no lists, no file paths.";
+  "You turn a coding assistant's latest message into a short spoken update " +
+  "for text-to-speech. Say only what the latest message tells the user right " +
+  "now: what was just done or found, and any question or decision left for " +
+  "them. Use the earlier conversation only to understand what the latest " +
+  "message refers to; never recap it. If the latest message recaps the whole " +
+  "session, keep only its outcome and what is new. 1-3 short, casual spoken " +
+  "sentences, like telling a colleague. No markdown, no code, no lists, no file paths.";
 
 function apiUrl(): string {
   return (process.env.VELOX_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
@@ -78,17 +87,29 @@ function messageText(message: any): string {
     .trim();
 }
 
-/** Latest assistant message on the current branch, or undefined. */
-function lastAssistantMessage(ctx: ExtensionContext): { id: string; text: string } | undefined {
+type LastMessage = { id: string; text: string; context: string };
+
+/**
+ * Latest assistant message on the current branch, with the few user and
+ * assistant turns before it as context, or undefined.
+ */
+function lastAssistantMessage(ctx: ExtensionContext): LastMessage | undefined {
   const branch = ctx.sessionManager.getBranch();
-  for (let i = branch.length - 1; i >= 0; i--) {
+  let msg: { id: string; text: string } | undefined;
+  const context: string[] = [];
+  for (let i = branch.length - 1; i >= 0 && context.length < CONTEXT_MESSAGES; i--) {
     const entry: any = branch[i];
-    if (entry?.type === "message" && entry.message?.role === "assistant") {
-      const text = messageText(entry.message);
-      if (text) return { id: entry.id ?? text, text };
+    const role = entry?.type === "message" ? entry.message?.role : undefined;
+    if (role !== "assistant" && role !== "user") continue;
+    const text = messageText(entry.message);
+    if (!text) continue;
+    if (!msg) {
+      if (role === "assistant") msg = { id: entry.id ?? text, text };
+    } else {
+      context.unshift((role === "user" ? "User: " : "Assistant: ") + text);
     }
   }
-  return undefined;
+  return msg && { ...msg, context: context.join("\n\n").slice(-CONTEXT_CHARS) };
 }
 
 /** Spoken session label: the /name session name, else the project directory. */
@@ -96,8 +117,13 @@ function sessionLabel(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionName()?.trim() || basename(ctx.cwd);
 }
 
-/** Ask Velox for a short spoken-style summary of the reply. */
-async function summarize(text: string, signal: AbortSignal): Promise<string> {
+function summaryInput({ text, context }: LastMessage): string {
+  const latest = "Latest message (speak this):\n" + text.slice(0, 20000);
+  return context ? "Earlier conversation (context only):\n" + context + "\n\n" + latest : latest;
+}
+
+/** Ask Velox for a short spoken-style summary of the latest step. */
+async function summarize(msg: LastMessage, signal: AbortSignal): Promise<string> {
   const response = await veloxFetch(
     "/v1/chat/completions",
     {
@@ -107,7 +133,7 @@ async function summarize(text: string, signal: AbortSignal): Promise<string> {
           role: "system",
           content: SUMMARY_PROMPT + " Write the summary in " + TTS_LANGUAGE() + ".",
         },
-        { role: "user", content: text.slice(0, 20000) },
+        { role: "user", content: summaryInput(msg) },
       ],
       max_tokens: 200,
     },
@@ -410,7 +436,7 @@ async function startSpeaking(ctx: ExtensionContext, chime = false): Promise<void
   let cached = false;
   try {
     ctx.ui.setStatus("tts", "summarizing…");
-    const summary = await summarize(msg.text, controller.signal);
+    const summary = await summarize(msg, controller.signal);
 
     ctx.ui.setStatus("tts", "synthesizing…");
     const audio = await synthesize((label + ". " + summary).slice(0, MAX_SPEECH_CHARS), controller.signal);
