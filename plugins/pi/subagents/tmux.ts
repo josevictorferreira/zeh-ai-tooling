@@ -86,3 +86,22 @@ export async function killSessionIfEmpty(exec: Exec, name: string): Promise<bool
   await exec("tmux", ["kill-session", "-t", "=" + name], { timeout: TIMEOUT });
   return true;
 }
+
+/**
+ * The tmux server's global environment, which new panes start from; undefined
+ * when no server is running (a new server copies the caller's environment).
+ * `-NAME` lines mark variables removed from it.
+ */
+export async function serverEnvironment(exec: Exec): Promise<Map<string, string | null> | undefined> {
+  const result = await exec("tmux", ["show-environment", "-g"], { timeout: TIMEOUT });
+  if (result.code !== 0) return undefined;
+  const env = new Map<string, string | null>();
+  for (const line of result.stdout.split("\n")) {
+    if (line.startsWith("-")) env.set(line.slice(1).trim(), null);
+    else {
+      const eq = line.indexOf("=");
+      if (eq > 0) env.set(line.slice(0, eq), line.slice(eq + 1));
+    }
+  }
+  return env;
+}

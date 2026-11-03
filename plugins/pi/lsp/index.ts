@@ -200,6 +200,8 @@ export default function (pi: ExtensionAPI) {
       "Once you have a symbol's file and line, use lsp (definition, references, " +
         "hover) instead of grep to follow it or check its type; lsp resolves " +
         "imports, overloads and re-exports that text search cannot.",
+      "Before renaming a symbol or changing a function's signature, run lsp " +
+        "findReferences on it and update every caller it lists.",
       "Do not call lsp diagnostics for a file you just edited or wrote: its errors " +
         "are already appended to the edit/write result.",
     ],

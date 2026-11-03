@@ -44,7 +44,7 @@ POST per run; ingestion failures never surface as session errors.
   dedupes results sorted by final score, each line prefixed `[user]` or
   `[project]`. If one bank fails the other is still returned with a note.
 - `hindsight_retain` — explicitly store one durable fact
-  (`scope: user|project`, `kind: preference|decision|lesson`, optional `why`).
+  (`scope: user|project`, optional `kind: preference|decision|lesson` (default preference for user, decision for project), optional `why`).
   Use `scope: user` for preferences/conventions that are not repo-specific,
   `scope: project` for decisions about this codebase.
 

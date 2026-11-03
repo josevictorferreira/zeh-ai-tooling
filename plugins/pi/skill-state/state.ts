@@ -199,7 +199,7 @@ function phaseErrors(prev: SkillExecutionState, next: SkillExecutionState, patch
 // command to run. "Search for X" or "Investigate Y" is more inspection, not a plan.
 const PATH_LIKE = /(^|[\s"'`(])[\w@.~-]*\/[\w@./~-]+|\b[\w-]+\.[a-z][a-z0-9]{0,5}\b/i;
 const LEADING_VERB = /^(run|execute|test|verify|check|exec_shell)\b/i;
-const COMMAND_TOKEN = /\b(exec_shell|bundle|npm|bun|pnpm|yarn|npx|rspec|pytest|jest|vitest|cargo|go test|make|rails|rake|git|mix|dotnet|mvn|gradle|tsc|eslint|rubocop)\b/i;
+const COMMAND_TOKEN = /\b(exec_shell|bundle|npm|bun|pnpm|yarn|npx|rspec|pytest|jest|vitest|cargo|go test|make|rails|rake|git|mix|dotnet|mvn|gradle|tsc|eslint|rubocop|nix)\b/i;
 export function isConcretePlanItem(item: string): boolean {
   const t = item.trim();
   return PATH_LIKE.test(t) || LEADING_VERB.test(t) || COMMAND_TOKEN.test(t) || t.includes("`");

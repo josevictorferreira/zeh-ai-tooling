@@ -8,8 +8,9 @@ Design and decisions: `.agents/specs/0003-subagents/plan.md`.
 
 | Tool | Parameters | Does |
 | --- | --- | --- |
-| `subagent_launch` | `type`, `title` (≤ 80 chars), `prompt` | Starts a pane running `pi --session-id <taskId> … "<prompt>"` and returns immediately with the task id. |
-| `subagent_check` | `taskId?` (id or unique prefix, ≥ 4 chars) | One line per own task, or the detail of one: status, model, turns, last result (≤ 16 KB), last 10 tool calls read from the child's session file. |
+| `subagent_launch` | `type`, `title` (≤ 80 chars), `prompt` | Starts a pane running `pi --session-id <taskId> … "<prompt>"` and returns immediately with the task id and the child's tool list. |
+| `subagent_wait` | `taskIds?`, `timeoutSeconds?` (default 600, max 3600) | Blocks until one of the given (default: all open) subagents finishes a turn or exits and returns every result ready at that moment, instead of a `subagent-result` message. For when the launcher cannot continue without the result. |
+| `subagent_check` | `taskId?` (id or unique prefix, ≥ 4 chars) | One line per own task, or the detail of one: status, model, turns, last result (≤ 64 KB), last 10 tool calls read from the child's session file. |
 | `subagent_send` | `taskId`, `message` | Queues a follow-up user message for an open subagent; its reply arrives like any other result. |
 | `subagent_close` | `taskId` | Closes the subagent and everything it launched: kills the pane, marks the task `closed`. |
 
@@ -22,12 +23,14 @@ Every settled turn of a child produces one `subagent-result` custom message in t
 ```
 subagent explorer "lsp hooks" (3f9c2a1b) finished turn 1 [stopReason: error] [fell back to velox/glm-5-3]
 
-<final assistant text of the child, capped at 8 KB>
+<final assistant text of the child, capped at 16 KB>
 
 The subagent is still open: reply with subagent_send to continue it, or subagent_close when done.
 ```
 
-Turns started by the user typing into the pane are handed back too. A child whose pane disappears without writing a result is reported once as `exited`.
+Turns started by the user typing into the pane are handed back too. A child whose pane disappears is reported once as `exited`; when its last result was already delivered, that message carries only the header and footer.
+
+The tool guidelines tell the launcher to keep working or end its turn while a subagent runs (a hand-back starts a new turn when it is idle), to use `subagent_wait` when it is blocked on a result, and never to `sleep` in bash or loop on `subagent_check`. The launch description lists each type's tools so the launcher does not ask a read-only type to run commands.
 
 ## Command
 
@@ -62,11 +65,16 @@ Prefer `rg` over `grep`. Always finish with a "Next steps" section.
 - `skills` entries are looked up as `~/.pi/agent/skills/<name>` then `<cwd>/.pi/skills/<name>`; an entry containing `/` is a path (relative to the cwd). The child is started with `--no-skills` plus one `--skill` per entry. An entry that resolves to nothing fails the launch.
 - Files are read on every launch; edits apply without restarting Pi.
 
-The child's system prompt is a fixed base ("you are a subagent of type X launched by another agent; your final message each turn is delivered verbatim to it…") + type prompt + override body, passed through `--append-system-prompt <file>`.
+The child's system prompt is a fixed base ("you are a subagent of type X launched by another agent; your final message each turn is delivered verbatim to it…") + its tool allowlist, when the type has one, with an instruction to report what those tools could not do + type prompt + override body, passed through `--append-system-prompt <file>`.
 
-## Fallback model
+## Fallback model and retry
 
-When a child's settled turn ends with `stopReason: "error"` and the type has `fallbackModel`, the child switches itself once (`pi.setModel`), records `fellBack`, and sends itself "the model was switched; continue the task". The pane and partial work are kept. A second error is handed back to the parent like any result.
+Pi's own retry (`retry.*` in settings) runs first; `agent_settled` reports an error only after it gave up. The child then recovers once:
+
+- With `fallbackModel` on the type, it switches itself (`pi.setModel`), records `fellBack`, and sends itself "the model was switched; continue the task".
+- Without one, it waits 30 s, records `retried`, and sends itself "retrying on the same model; continue the task". This covers transient gateway errors (503, connection resets).
+
+The pane and partial work are kept. A second error is handed back to the parent like any result, tagged `[fell back to …]` or `[retried once]`.
 
 ## Files and environment
 
@@ -82,24 +90,26 @@ State lives outside the repository, keyed like skill-state's checkpoints:
 
 One file per task: the launcher writes it once, then only the child, then only the closer, so no locking is needed. Writes are tmp-then-rename.
 
-Panes receive three variables: `PI_SUBAGENT_TASK` (task id = the child's session id), `PI_SUBAGENT_ROOT` (root session id, inherited unchanged by grandchildren), `PI_SUBAGENT_PARENT` (launching session id). `PI_SUBAGENT_TASK` switches the extension into the child role in that process.
+Panes start from the tmux server's environment, which may predate the shell holding your API keys. The launcher therefore passes with `-e` every variable of its own environment whose value differs from `tmux show-environment -g`, except `PI_SUBAGENT_*`, `TMUX*`, `TERM*`, `SHLVL`, `PWD`, `OLDPWD` and `_`. When no tmux server runs yet, tmux starts one from the launcher's environment and nothing is forwarded. Forwarded values, secrets included, appear briefly in the `tmux` client's argv and stay in the pane's environment.
 
-When this extension is loaded from a repo checkout with `-e` (as opposed to `~/.pi/agent/extensions` or `<cwd>/.pi/extensions`), the launcher adds `-e <this index.ts>` to the child command so the child role is present there too.
+Panes also receive three variables: `PI_SUBAGENT_TASK` (task id = the child's session id), `PI_SUBAGENT_ROOT` (root session id, inherited unchanged by grandchildren), `PI_SUBAGENT_PARENT` (launching session id). `PI_SUBAGENT_TASK` switches the extension into the child role in that process.
+
+When this extension is loaded from a repo checkout with `-e` (as opposed to `~/.pi/agent/extensions` or `<cwd>/.pi/extensions`), the launcher adds `-e <this index.ts>` to the child command so the child role is present there too. If a copy is also installed in one of those places, the launcher must have been started with `-ne` (the two copies' tools would conflict), so the child gets `-ne -e <this index.ts>` as well; such a dev-mode child has no sibling extensions.
 
 ## tmux
 
 - Session `pi-<first 8 chars of the root session id>`, window `subagents`, one pane per task, `tiled` layout. The first subagent *is* the first pane (no idle shell). Attach with `tmux attach -t pi-<id8>`; `/subagents` prints the command.
 - More than about four concurrent subagents gets cramped. `tmux break-pane -d` moves a pane to its own window; the pane id is kept, so it is still tracked.
-- Panes inherit the **tmux server's** environment plus the three variables above, not the launcher's. If the server was started from a shell without your provider credentials, children fail to authenticate; start tmux from a configured shell or use `tmux set-environment -g`.
+- Panes get the tmux server's environment plus the launcher's differing variables (see above), so a tmux server started before your keys were exported no longer breaks children.
 - Quitting a Pi session closes every subagent it launched (recursively); the root also kills the tmux session once it has no panes. Task files are kept as history.
 
 ## Limits and failure policy
 
 - No `tmux` or `pi` on `PATH`, unknown type, unresolvable skill, unknown or foreign task id: readable tool error, nothing launched.
 - tmux failures (bad server, no permission) are returned with tmux's stderr; the pre-written record is removed.
-- Caps: result in the hand-back 8 KB, in `subagent_check` 16 KB; tool-call tail 10 entries × 80 chars.
+- Caps: result in the hand-back and `subagent_wait` 16 KB, in `subagent_check` 64 KB; tool-call tail 10 entries × 80 chars.
 - No dependency scheduling, no result piping between tasks, no per-launch overrides, no Windows/non-tmux backend.
-- The launcher polls task files and `tmux list-panes` every 1.5 s while it has open tasks; the child polls its inbox at the same rate.
+- The launcher polls task files and `tmux list-panes` every 1.5 s while a task is starting or running, and every 10 s once all open tasks are idle and handed back. It stays fast for 30 s after a launch or `subagent_send`. The child polls its inbox every 1.5 s.
 
 ## Verification
 

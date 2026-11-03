@@ -7,6 +7,9 @@ import { readInboxFrom, readTask, updateTask, writeResult } from "./state";
 // the inbox. The child never knows whether its parent is still alive.
 
 const INBOX_POLL_MS = 1500;
+// Pi's own retry (3 attempts, 2-8 s backoff) has already given up when
+// agent_settled reports an error, so the same-model retry waits longer.
+const RETRY_DELAY_MS = 30_000;
 
 function messageText(message: any): string {
   const content = message?.content;
@@ -65,10 +68,23 @@ export function registerChild(pi: ExtensionAPI, taskId: string, rootSessionId: s
     }
   }
 
-  /** Switch to the fallback model after a provider error; true when a retry was started. */
+  /**
+   * Recover once from a provider error: switch to the type's fallback model, or
+   * without one retry the same model after RETRY_DELAY_MS. True when a retry was started.
+   */
   async function tryFallback(ctx: ExtensionContext, errorMessage: string | undefined): Promise<boolean> {
     const record = await readTask(ctx.cwd, rootSessionId, taskId);
-    if (!record?.fallbackModel || record.fellBack) return false;
+    if (!record || record.fellBack || record.retried) return false;
+    if (!record.fallbackModel) {
+      await patch(ctx, { retried: true, status: "running" });
+      setTimeout(() => {
+        const live = current ?? ctx;
+        const message = "The previous attempt failed with a provider error (" + (errorMessage ?? "unknown error") +
+          "). Retrying on the same model; continue the task.";
+        Promise.resolve(pi.sendUserMessage(message, live.isIdle() ? undefined : { deliverAs: "followUp" })).catch(() => undefined);
+      }, RETRY_DELAY_MS);
+      return true;
+    }
     const slash = record.fallbackModel.indexOf("/");
     const model = slash > 0
       ? ctx.modelRegistry.find(record.fallbackModel.slice(0, slash), record.fallbackModel.slice(slash + 1))

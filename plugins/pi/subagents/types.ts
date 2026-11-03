@@ -157,8 +157,18 @@ export async function resolveType(name: string): Promise<SubagentType> {
   return type;
 }
 
+/** "explorer (description; tools: a, b)" as listed to the launching model. */
+export function describeType(type: SubagentType): string {
+  return type.name + " (" + type.description + "; tools: " + (type.tools ? type.tools.join(", ") : "all") + ")";
+}
+
 export function buildSystemPrompt(type: SubagentType): string {
-  return BASE_PROMPT.replace("{type}", type.name) + "\n\n" + type.prompt + "\n";
+  const tools = type.tools
+    ? "\n\nYour tools are limited to: " + type.tools.join(", ") + " (some may be absent). If the task asks for " +
+      "something these cannot do, such as running a shell command, do the rest and state plainly in your " +
+      "final message what you could not do and why."
+    : "";
+  return BASE_PROMPT.replace("{type}", type.name) + tools + "\n\n" + type.prompt + "\n";
 }
 
 async function exists(path: string): Promise<boolean> {

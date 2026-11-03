@@ -32,6 +32,8 @@ export interface TaskRecord {
   turns: number;
   lastStopReason?: string;
   fellBack?: boolean;
+  /** Set when the child retried its model once after a provider error (no fallbackModel). */
+  retried?: boolean;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;

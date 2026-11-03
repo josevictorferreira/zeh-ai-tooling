@@ -549,7 +549,8 @@ export default function (pi: ExtensionAPI) {
       "specific to this repo ('always use bun', 'no em dashes', 'ask before " +
       "committing'); use scope 'project' for decisions about this codebase. " +
       "Use kind 'lesson' when you realise mid-run that you lacked context you " +
-      "should have had.",
+      "should have had. kind defaults to 'preference' for scope 'user' and " +
+      "'decision' for scope 'project'.",
     promptSnippet: "Store a durable user preference, project decision or lesson",
     promptGuidelines: [
       "Use hindsight_retain (scope 'user') whenever the user states a " +
@@ -560,9 +561,11 @@ export default function (pi: ExtensionAPI) {
       scope: StringEnum(["user", "project"] as const, {
         description: "user-wide memory or this-project memory.",
       }),
-      kind: StringEnum(["preference", "decision", "lesson"] as const, {
-        description: "What kind of memory this is.",
-      }),
+      kind: Type.Optional(
+        StringEnum(["preference", "decision", "lesson"] as const, {
+          description: "What kind of memory this is. Default: preference (scope user) or decision (scope project).",
+        }),
+      ),
       content: Type.String({
         minLength: 8,
         description: "The fact/preference/decision/lesson to store, one or two sentences.",
@@ -577,14 +580,15 @@ export default function (pi: ExtensionAPI) {
         params.why && params.why.trim()
           ? params.content + " — because " + params.why.trim()
           : params.content;
-      const tags = ["kind:" + params.kind];
+      const kind = params.kind ?? (params.scope === "user" ? "preference" : "decision");
+      const tags = ["kind:" + kind];
       if (params.scope === "user") tags.push("project:" + deriveBankId(ctx.cwd));
 
       const { error, status } = await callApi(
         "hindsight_retain",
         bankId,
         "/memories",
-        { items: [{ content, context: KIND_CONTEXT[params.kind], tags }], async: true },
+        { items: [{ content, context: KIND_CONTEXT[kind], tags }], async: true },
         undefined,
       );
       if (error) return errorResult(error, status);
@@ -593,7 +597,7 @@ export default function (pi: ExtensionAPI) {
         content: [
           { type: "text" as const, text: "Stored in " + params.scope + " bank (" + bankId + "): " + params.content },
         ],
-        details: { bankId, scope: params.scope, kind: params.kind },
+        details: { bankId, scope: params.scope, kind },
       };
     },
   });
