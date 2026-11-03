@@ -40,7 +40,10 @@ let
         attrset:
         lib.mapAttrs'
           (name: value: {
-            name = "${name}.md";
+            # Pi loads prompt templates (slash commands) from
+            # ~/.pi/agent/prompts/, NOT from the agent dir root — flat keys
+            # here silently produce files pi never reads.
+            name = "prompts/${name}.md";
             value = toPiPromptTemplate value;
           })
           attrset;
