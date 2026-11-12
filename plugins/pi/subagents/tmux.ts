@@ -10,9 +10,10 @@ export type Exec = (command: string, args: string[], options?: ExecOptions) => P
 export const WINDOW_NAME = "subagents";
 const TIMEOUT = 5000;
 
-export function sessionName(rootSessionId: string): string {
-  return "pi-" + rootSessionId.slice(0, 8);
-}
+// tmux has no nested sessions. The session holding a root's panes is tagged
+// with this user option and found by it, so its name is free to describe where
+// it came from: "<launcher's tmux session>/pi-<pi session name or cwd>".
+const ROOT_OPTION = "@pi_root";
 
 /** POSIX single-quote quoting; valid in sh, bash, zsh and fish. */
 export function shellQuote(value: string): string {
@@ -34,6 +35,9 @@ export async function hasSession(exec: Exec, name: string): Promise<boolean> {
 }
 
 export interface SpawnOptions {
+  /** Root session id; selects (or tags) the tmux session. */
+  root: string;
+  /** Name for the session when this root has none yet. */
   name: string;
   cwd: string;
   env: Record<string, string>;
@@ -41,33 +45,70 @@ export interface SpawnOptions {
   command: string;
 }
 
-/**
- * Run `command` in a new pane of session `name`, creating the session when
- * needed (the first subagent is then the first pane, no idle shell is left).
- * Returns the tmux pane id ("%N").
- */
-export async function spawnPane(exec: Exec, options: SpawnOptions): Promise<string> {
-  const envArgs = Object.entries(options.env).flatMap(([k, v]) => ["-e", k + "=" + v]);
-  const common = ["-c", options.cwd, ...envArgs, "-P", "-F", "#{pane_id}"];
-  const target = options.name + ":" + WINDOW_NAME;
-  let paneId: string;
-  if (!(await hasSession(exec, options.name))) {
-    paneId = await tmux(exec, ["new-session", "-d", "-s", options.name, "-n", WINDOW_NAME, ...common, options.command]);
-  } else {
-    try {
-      paneId = await tmux(exec, ["split-window", "-t", target, ...common, options.command]);
-    } catch {
-      // the window was closed or renamed: start a fresh one with the same name
-      paneId = await tmux(exec, ["new-window", "-t", options.name, "-n", WINDOW_NAME, ...common, options.command]);
-    }
+/** The tmux session holding this root's panes, found by its tag. */
+export async function findSession(exec: Exec, root: string): Promise<string | undefined> {
+  const result = await exec("tmux", ["list-sessions", "-F", "#{" + ROOT_OPTION + "}\t#{session_name}"], { timeout: TIMEOUT });
+  if (result.code !== 0) return undefined;
+  for (const line of result.stdout.split("\n")) {
+    const tab = line.indexOf("\t");
+    if (tab > 0 && line.slice(0, tab) === root) return line.slice(tab + 1);
   }
-  await exec("tmux", ["select-layout", "-t", target, "tiled"], { timeout: TIMEOUT });
-  return paneId;
+  return undefined;
 }
 
-/** Pane ids currently alive in the session; empty when the session is gone. */
-export async function listPanes(exec: Exec, name: string): Promise<Set<string>> {
-  const result = await exec("tmux", ["list-panes", "-s", "-t", "=" + name, "-F", "#{pane_id}"], { timeout: TIMEOUT });
+/** Session name of a pane (the launcher's own, via $TMUX_PANE); undefined outside tmux. */
+export async function paneSession(exec: Exec, paneId: string | undefined): Promise<string | undefined> {
+  if (!paneId) return undefined;
+  const result = await exec("tmux", ["display-message", "-p", "-t", paneId, "#{session_name}"], { timeout: TIMEOUT });
+  return result.code === 0 ? result.stdout.trim() || undefined : undefined;
+}
+
+/** tmux rejects "." and ":" in session names. */
+export function cleanName(name: string): string {
+  return name.replace(/[.:]/g, "_").trim();
+}
+
+/**
+ * Run `command` in a new pane of the root's session, creating and tagging the
+ * session when needed (the first subagent is then the first pane, no idle shell
+ * is left). A name already taken by another session gets the root id appended.
+ */
+export async function spawnPane(exec: Exec, options: SpawnOptions): Promise<{ paneId: string; session: string }> {
+  const envArgs = Object.entries(options.env).flatMap(([k, v]) => ["-e", k + "=" + v]);
+  const common = ["-c", options.cwd, ...envArgs, "-P", "-F", "#{pane_id}"];
+  let session = await findSession(exec, options.root);
+  let paneId: string;
+  if (!session) {
+    session = cleanName(options.name);
+    if (await hasSession(exec, session)) session += "-" + options.root.slice(0, 8);
+    paneId = await tmux(exec, ["new-session", "-d", "-s", session, "-n", WINDOW_NAME, ...common, options.command]);
+    await tmux(exec, ["set-option", "-t", paneId, ROOT_OPTION, options.root]);
+  } else {
+    try {
+      paneId = await tmux(exec, ["split-window", "-t", "=" + session + ":" + WINDOW_NAME, ...common, options.command]);
+    } catch {
+      // the window was closed or renamed: start a fresh one with the same name
+      paneId = await tmux(exec, ["new-window", "-t", "=" + session + ":", "-n", WINDOW_NAME, ...common, options.command]);
+    }
+  }
+  await exec("tmux", ["select-layout", "-t", paneId, "tiled"], { timeout: TIMEOUT });
+  return { paneId, session };
+}
+
+/** Rename the root's session, keeping it unique; returns the name it ends up with. */
+export async function renameSession(exec: Exec, root: string, name: string): Promise<string | undefined> {
+  const current = await findSession(exec, root);
+  if (!current) return undefined;
+  let next = cleanName(name);
+  if (next === current) return current;
+  if (await hasSession(exec, next)) next += "-" + root.slice(0, 8);
+  const result = await exec("tmux", ["rename-session", "-t", "=" + current, next], { timeout: TIMEOUT });
+  return result.code === 0 ? next : current;
+}
+
+/** Ids of every pane alive on the server (pane ids are unique server-wide). */
+export async function livePanes(exec: Exec): Promise<Set<string>> {
+  const result = await exec("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], { timeout: TIMEOUT });
   if (result.code !== 0) return new Set();
   return new Set(result.stdout.split("\n").map((l) => l.trim()).filter(Boolean));
 }
@@ -80,11 +121,13 @@ export async function killPane(exec: Exec, paneId: string): Promise<void> {
   }
 }
 
-export async function killSessionIfEmpty(exec: Exec, name: string): Promise<boolean> {
-  if (!(await hasSession(exec, name))) return true;
-  if ((await listPanes(exec, name)).size > 0) return false;
-  await exec("tmux", ["kill-session", "-t", "=" + name], { timeout: TIMEOUT });
-  return true;
+/** Kill the root's session if no pane is left in it. */
+export async function killSessionIfEmpty(exec: Exec, root: string): Promise<void> {
+  const session = await findSession(exec, root);
+  if (!session) return;
+  const result = await exec("tmux", ["list-panes", "-s", "-t", "=" + session, "-F", "#{pane_id}"], { timeout: TIMEOUT });
+  if (result.code === 0 && result.stdout.trim()) return;
+  await exec("tmux", ["kill-session", "-t", "=" + session], { timeout: TIMEOUT });
 }
 
 /**

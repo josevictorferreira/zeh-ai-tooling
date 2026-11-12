@@ -34,7 +34,7 @@ The tool guidelines tell the launcher to keep working or end its turn while a su
 
 ## Command
 
-`/subagents [--all]` prints the launch tree of the current root (`<id8> <type> "<title>" <status> turns=<n> <model>`) and the `tmux attach -t pi-<id8>` hint. `--all` lists every root recorded for this directory, newest first (read-only history).
+`/subagents [--all]` prints the launch tree of the current root (`<id8> <type> "<title>" <status> turns=<n> <model>`) and the `tmux attach` command for its tmux session. `--all` lists every root recorded for this directory, newest first (read-only history).
 
 ## Types
 
@@ -98,7 +98,8 @@ When this extension is loaded from a repo checkout with `-e` (as opposed to `~/.
 
 ## tmux
 
-- Session `pi-<first 8 chars of the root session id>`, window `subagents`, one pane per task, `tiled` layout. The first subagent *is* the first pane (no idle shell). Attach with `tmux attach -t pi-<id8>`; `/subagents` prints the command.
+- One tmux session per root, named `<launcher tmux session>/pi-<pi session name or cwd basename>` (the prefix is left out when the launcher is not in tmux; `.` and `:` become `_`). tmux has no nested sessions, so the prefix is what places it next to its launcher in `choose-tree` (`prefix s`). A name another session already holds gets the root id8 appended. The session is tagged with the `@pi_root` user option and always found by that tag, so `/name` in the root renames it. Window `subagents`, one pane per task, `tiled` layout. The first subagent *is* the first pane (no idle shell); `/subagents` prints the attach command.
+- A pane cannot answer pi's project-trust prompt, so each child gets `--approve` or `--no-approve` matching the launcher's own trust decision.
 - More than about four concurrent subagents gets cramped. `tmux break-pane -d` moves a pane to its own window; the pane id is kept, so it is still tracked.
 - Panes get the tmux server's environment plus the launcher's differing variables (see above), so a tmux server started before your keys were exported no longer breaks children.
 - Quitting a Pi session closes every subagent it launched (recursively); the root also kills the tmux session once it has no panes. Task files are kept as history.

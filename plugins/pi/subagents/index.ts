@@ -1,6 +1,6 @@
 import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { access, readFile } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { registerChild } from "./child";
@@ -21,7 +21,7 @@ import {
   writeTask,
   type TaskRecord,
 } from "./state";
-import { killPane, killSessionIfEmpty, listPanes, serverEnvironment, sessionName, shellQuote, spawnPane, type Exec } from "./tmux";
+import { findSession, killPane, killSessionIfEmpty, livePanes, paneSession, renameSession, serverEnvironment, shellQuote, spawnPane, type Exec } from "./tmux";
 import { buildSystemPrompt, BUILTIN_TYPES, describeType, resolveSkills, resolveType } from "./types";
 
 // Subagents: delegate work to separate interactive `pi` processes in tmux
@@ -145,10 +145,18 @@ export default function (pi: ExtensionAPI) {
   const rootOf = (ctx: ExtensionContext) => envRoot ?? ctx.sessionManager.getSessionId();
   const mine = (ctx: ExtensionContext, tree: TaskRecord[]) =>
     tree.filter((t) => t.parentSessionId === ctx.sessionManager.getSessionId());
+  // Name for a root's tmux session: under the launcher's own tmux session, after the pi session name (or cwd).
+  const tmuxName = async (ctx: ExtensionContext, label = pi.getSessionName()) => {
+    const parent = await paneSession(exec, process.env.TMUX_PANE);
+    return (parent ? parent + "/" : "") + "pi-" + (label?.trim() || basename(ctx.cwd)).slice(0, 40);
+  };
+  // Launches run one at a time so parallel ones share a single new session.
+  let spawning: Promise<unknown> = Promise.resolve();
 
   // ---- poller: watches this process's tasks and hands finished turns back ----
   const handed = new Map<string, number>(); // taskId -> last turn handed back
   const waited = new Map<string, number>(); // taskId -> active subagent_wait calls covering it
+  const sent = new Set<string>(); // taskIds sent a message whose reply has not been handed back yet
   let timer: ReturnType<typeof setTimeout> | undefined;
   let ticking = false;
   let pollCtx: ExtensionContext | undefined;
@@ -167,6 +175,7 @@ export default function (pi: ExtensionAPI) {
     const last = handed.get(t.id) ?? 0;
     if (t.status === "idle" && t.turns > last) {
       handed.set(t.id, t.turns);
+      sent.delete(t.id);
       return { task: t, note: "finished turn " + t.turns, fresh: true };
     }
     if (t.paneId && !panes.has(t.paneId)) {
@@ -224,7 +233,7 @@ export default function (pi: ExtensionAPI) {
         next = undefined;
         return;
       }
-      const panes = await listPanes(exec, sessionName(root));
+      const panes = await livePanes(exec);
       for (const t of tasks) {
         if (waited.has(t.id)) continue; // subagent_wait returns it instead
         const ready = await takeReady(ctx.cwd, root, t, panes);
@@ -265,7 +274,7 @@ export default function (pi: ExtensionAPI) {
     if (t.paneId && t.status !== "closed") {
       await killPane(exec, t.paneId);
       const deadline = Date.now() + CLOSE_WAIT_MS;
-      while (Date.now() < deadline && (await listPanes(exec, sessionName(t.rootSessionId))).has(t.paneId)) {
+      while (Date.now() < deadline && (await livePanes(exec)).has(t.paneId)) {
         await new Promise((r) => setTimeout(r, 200));
       }
     }
@@ -337,6 +346,8 @@ export default function (pi: ExtensionAPI) {
 
       const argv = [
         piBin, "--session-id", id, "-n", type.name + ": " + params.title,
+        // the pane cannot answer pi's project-trust prompt; reuse the launcher's decision
+        ctx.isProjectTrusted() ? "--approve" : "--no-approve",
         ...(await childExtensionArgs(ctx.cwd)),
         ...(model ? ["--model", model] : []),
         ...(type.tools ? ["--tools", type.tools.join(",")] : []),
@@ -344,11 +355,12 @@ export default function (pi: ExtensionAPI) {
         "--append-system-prompt", systemFile,
         "--", params.prompt,
       ];
-      const name = sessionName(root);
       let paneId: string;
+      let name: string;
       try {
-        paneId = await spawnPane(exec, {
-          name,
+        const spawn = spawning.then(async () => spawnPane(exec, {
+          root,
+          name: await tmuxName(ctx),
           cwd: ctx.cwd,
           env: {
             ...(await forwardedEnv(exec)),
@@ -357,7 +369,9 @@ export default function (pi: ExtensionAPI) {
             PI_SUBAGENT_PARENT: record.parentSessionId,
           },
           command: argv.map(shellQuote).join(" "),
-        });
+        }));
+        spawning = spawn.catch(() => undefined);
+        ({ paneId, session: name } = await spawn);
       } catch (err) {
         await removeTask(ctx.cwd, root, id);
         return fail((err as Error).message);
@@ -400,7 +414,7 @@ export default function (pi: ExtensionAPI) {
       const tail = await toolCallTail(t.sessionFile, 10);
       const lines = [
         describe(t),
-        "pane " + (t.paneId ?? "?") + " in tmux session " + sessionName(root) + (t.lastStopReason ? ", last stop reason " + t.lastStopReason : ""),
+        "pane " + (t.paneId ?? "?") + " in tmux session " + ((await findSession(exec, root)) ?? "(gone)") + (t.lastStopReason ? ", last stop reason " + t.lastStopReason : ""),
         "",
         "## Last result", result ?? "(none yet)",
       ];
@@ -432,12 +446,20 @@ export default function (pi: ExtensionAPI) {
       if (targets.length === 0) {
         return text("no open subagents to wait for; a subagent that already finished or exited was reported as a subagent-result message", { ready: [] });
       }
-      const ids = [...new Set(targets.map((t) => t.id))];
+      // Idle, already handed back and not messaged since: nothing will come. The
+      // hand-back may still be queued behind this call, so return those results now
+      // when nothing else is pending, and otherwise leave them out of the wait.
+      const settled = targets.filter((t) => t.status === "idle" && t.turns > 0 && t.turns <= (handed.get(t.id) ?? 0) && !sent.has(t.id));
+      if (settled.length === targets.length) {
+        const parts = await Promise.all(settled.map((t) => formatReady(ctx.cwd, { task: t, note: "is idle after turn " + t.turns + " (already reported as a subagent-result message)", fresh: true })));
+        return text(parts.join("\n\n---\n\n"), { ready: settled.map((t) => t.id) });
+      }
+      const ids = [...new Set(targets.filter((t) => !settled.includes(t)).map((t) => t.id))];
       for (const id of ids) waited.set(id, (waited.get(id) ?? 0) + 1);
       const deadline = Date.now() + (params.timeoutSeconds ?? WAIT_DEFAULT_S) * 1000;
       try {
         while (!signal?.aborted && Date.now() < deadline) {
-          const panes = await listPanes(exec, sessionName(root));
+          const panes = await livePanes(exec);
           const ready: Ready[] = [];
           let stillOpen = 0;
           for (const id of ids) {
@@ -488,6 +510,7 @@ export default function (pi: ExtensionAPI) {
       }
       if (isTerminal(t.status)) return fail("subagent " + shortId(t.id) + " is " + t.status + "; launch a new one instead");
       await appendInbox(ctx.cwd, root, t.id, params.message);
+      sent.add(t.id);
       startPoller(ctx);
       return text("queued for " + shortId(t.id) + "; its reply will arrive as a subagent-result message", { taskId: t.id });
     },
@@ -538,8 +561,8 @@ export default function (pi: ExtensionAPI) {
         if (tree.length === 0 && roots.length === 1) lines.push("no subagents in this session");
       }
       if (roots.length === 0) lines.push("no subagent history for " + ctx.cwd);
-      const name = sessionName(rootOf(ctx));
-      lines.push("", "panes live in tmux session " + name + " (tmux attach -t " + name + ")");
+      const name = await findSession(exec, rootOf(ctx));
+      if (name) lines.push("", "panes live in tmux session " + name + " (tmux attach -t " + shellQuote("=" + name) + ")");
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
@@ -557,6 +580,12 @@ export default function (pi: ExtensionAPI) {
         // best effort; the pane may already be gone
       }
     }
-    if (!envRoot) await killSessionIfEmpty(exec, sessionName(root)).catch(() => undefined);
+    if (!envRoot) await killSessionIfEmpty(exec, root).catch(() => undefined);
+  });
+
+  // ---- /name: keep the root's tmux session named after this pi session ----
+  pi.on("session_info_changed", async (event, ctx) => {
+    if (envRoot) return; // a subagent's name does not name the shared session
+    await renameSession(exec, rootOf(ctx), await tmuxName(ctx, event.name)).catch(() => undefined);
   });
 }
