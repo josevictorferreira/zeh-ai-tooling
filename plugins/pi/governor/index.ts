@@ -314,6 +314,7 @@ export function createGovernorExtension() {
           { value: "set lean", label: "set lean", description: "Profile: lean (20 finalize)" },
           { value: "set standard", label: "set standard", description: "Profile: standard (44 finalize)" },
           { value: "set deep", label: "set deep", description: "Profile: deep (60 finalize)" },
+          { value: "set unlimited", label: "set unlimited", description: "Profile: unlimited (no budget, compaction on)" },
           { value: "set off", label: "set off", description: "Profile: off (disabled)" },
           { value: "reset", label: "reset", description: "Reset run counters and steering state" },
         ];
@@ -348,6 +349,8 @@ export function createGovernorExtension() {
             const newP = PROFILES[target];
             if (target === "off") {
               ctx.ui.notify("Governor profile set to off (budget and compaction inactive)", "info");
+            } else if (target === "unlimited") {
+              ctx.ui.notify("Governor profile set to unlimited (no budget or steering; compaction active)", "info");
             } else {
               ctx.ui.notify(
                 `Governor profile set to ${target} (economy: ${newP.economyAfter}, convergence: ${newP.convergenceAfter}, finalize: ${newP.finalizeAfter})`,
@@ -357,7 +360,7 @@ export function createGovernorExtension() {
             return;
           }
           ctx.ui.notify(
-            `Unknown profile "${target}". Valid options: lean, standard, deep, off`,
+            `Unknown profile "${target}". Valid options: lean, standard, deep, unlimited, off`,
             "error",
           );
           return;
@@ -377,7 +380,7 @@ export function createGovernorExtension() {
           return;
         }
 
-        ctx.ui.notify("Usage: /governor [set <lean|standard|deep|off> | reset]", "warning");
+        ctx.ui.notify("Usage: /governor [set <lean|standard|deep|unlimited|off> | reset]", "warning");
       },
     });
   };

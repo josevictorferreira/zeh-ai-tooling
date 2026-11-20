@@ -24,8 +24,10 @@ Profiles adapt the tool budget to task complexity:
 | `lean` | 6 calls | 12 calls | 3 calls | 20 calls |
 | `standard` | 14 calls | 26 calls | 6 calls | 44 calls |
 | `deep` | 20 calls | 36 calls | 8 calls | 60 calls |
+| `unlimited` | $\infty$ | $\infty$ | $\infty$ | $\infty$ |
 | `off` | $\infty$ | $\infty$ | $\infty$ | $\infty$ |
 
+- **`unlimited` vs `off`:** both remove the budget and steering, so the agent runs until it finishes. `unlimited` keeps output compaction on; `off` disables it too.
 - **Normal phase:** Agent explores normally with no steering injected.
 - **Economy phase:** Steers the agent to batch reads, skip unnecessary narration, and avoid re-reading files.
 - **Convergence phase:** Reminds the agent to stop broad exploration, verify changes against tests, and write the final answer.
@@ -56,7 +58,7 @@ Spill files older than 7 days are automatically pruned at startup.
 ### `/governor`
 Displays current governor status: active profile, current phase, tool calls (allowed vs blocked), compactions, characters saved, and spill directory.
 
-### `/governor set <lean|standard|deep|off>`
+### `/governor set <lean|standard|deep|unlimited|off>`
 Switches the active profile mid-session. Takes effect on the very next tool call.
 
 ### `/governor reset`
@@ -67,7 +69,7 @@ Resets the tool count and steering cadence for the current run (useful as an esc
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PI_GOVERNOR_ENABLED` | `1` | Set to `0`, `false`, or `off` to disable governor entirely. |
-| `PI_GOVERNOR_PROFILE` | `standard` | Default profile: `lean`, `standard`, `deep`, or `off`. |
+| `PI_GOVERNOR_PROFILE` | `standard` | Default profile: `lean`, `standard`, `deep`, `unlimited`, or `off`. |
 | `PI_GOVERNOR_MAX_CHARS` | `4000` | Output length threshold before compaction is triggered. |
 | `PI_GOVERNOR_HEAD_CHARS` | `2400` | Maximum characters to retain from the output head. |
 | `PI_GOVERNOR_TAIL_CHARS` | `900` | Maximum characters to retain from the output tail. |

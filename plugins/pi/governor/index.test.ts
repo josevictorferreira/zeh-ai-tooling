@@ -245,3 +245,44 @@ test("/governor command supports inspect, set, and reset", async () => {
   await cmd.handler("set ultra", ctx);
   assert.match(notifications[3], /Unknown profile "ultra"/);
 });
+
+test("unlimited profile never blocks tool calls but still compacts output", async () => {
+  process.env.PI_GOVERNOR_PROFILE = "unlimited";
+  const mock = createMockPi();
+  const ext = createGovernorExtension();
+  ext(mock.api);
+
+  const ctx = createMockCtx();
+  await mock.emit("before_agent_start", {}, ctx);
+
+  // Well past the deep cap (60) with no block, across turns
+  for (let i = 0; i < 200; i++) {
+    const res = await mock.emit("tool_call", {
+      type: "tool_call",
+      toolCallId: `call-${i}`,
+      toolName: "grep",
+      input: { pattern: "x" },
+    } as ToolCallEvent, ctx);
+    assert.equal(res, undefined);
+    if (i % 10 === 9) await mock.emit("turn_end", {}, ctx);
+  }
+
+  const longText = Array.from({ length: 2000 }, (_, i) => `match line ${i}`).join("\n");
+  const res = await mock.emit("tool_result", {
+    type: "tool_result",
+    toolCallId: "call-199",
+    toolName: "grep",
+    input: {},
+    content: [{ type: "text", text: longText }],
+    isError: false,
+  } as ToolResultEvent, ctx);
+  assert.ok(res !== undefined);
+  assert.equal(res.content.length, 1); // compacted, no steering block
+  assert.match(res.content[0].text, /\[Governor: output compacted/);
+
+  await mock.emit("agent_settled", {}, ctx);
+  assert.equal(mock.entries[0].data.count, 200);
+  assert.equal(mock.entries[0].data.blocked, 0);
+
+  delete process.env.PI_GOVERNOR_PROFILE;
+});

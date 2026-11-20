@@ -1,4 +1,4 @@
-export type ProfileName = "lean" | "standard" | "deep" | "off";
+export type ProfileName = "lean" | "standard" | "deep" | "unlimited" | "off";
 export type Phase = "normal" | "economy" | "convergence" | "halt";
 
 export interface Profile {
@@ -30,6 +30,14 @@ export const PROFILES: Record<ProfileName, Profile> = {
     convergenceAfter: 36,
     reminderEvery: 8,
     finalizeAfter: 60,
+  },
+  // No budget and no steering, but output compaction stays on.
+  unlimited: {
+    name: "unlimited",
+    economyAfter: Infinity,
+    convergenceAfter: Infinity,
+    reminderEvery: Infinity,
+    finalizeAfter: Infinity,
   },
   off: {
     name: "off",
@@ -121,6 +129,8 @@ export function formatStatus(
   blocked: number,
 ): string | undefined {
   if (profile.name === "off") return undefined;
+
+  if (profile.name === "unlimited") return `♾️ unlimited ${count}`;
 
   const tag = shortName(profile.name);
   const fin = profile.finalizeAfter;

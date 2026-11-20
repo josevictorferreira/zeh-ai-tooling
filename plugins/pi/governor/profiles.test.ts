@@ -112,3 +112,11 @@ test("formatStatus formats according to spec", () => {
   assert.equal(formatStatus(std, 44, 1), "🛑 std halt 44/44");
   assert.equal(formatStatus(std, 45, 0), "🛑 std halt 45/44");
 });
+
+test("profile 'unlimited' never halts or steers, and shows the count", () => {
+  const unl = PROFILES.unlimited;
+  assert.equal(isProfileName("unlimited"), true);
+  assert.equal(phaseFor(unl, 10_000), "normal");
+  assert.equal(nextSteering(unl, 10_000, "normal", 0), undefined);
+  assert.equal(formatStatus(unl, 120, 0), "♾️ unlimited 120");
+});
