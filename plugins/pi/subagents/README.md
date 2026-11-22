@@ -8,7 +8,7 @@ Design and decisions: `.agents/specs/0003-subagents/plan.md`.
 
 | Tool | Parameters | Does |
 | --- | --- | --- |
-| `subagent_launch` | `type`, `title` (≤ 80 chars), `prompt` | Starts a pane running `pi --session-id <taskId> … "<prompt>"` and returns immediately with the task id and the child's tool list. |
+| `subagent_launch` | `type`, `title` (≤ 80 chars), `prompt`, `model?` (`provider/id`, replaces the type's model for this launch) | Starts a pane running `pi --session-id <taskId> … "<prompt>"` and returns immediately with the task id and the child's tool list. An unknown model fails the launch. |
 | `subagent_wait` | `taskIds?`, `timeoutSeconds?` (default 600, max 3600) | Blocks until one of the given (default: all open) subagents finishes a turn or exits and returns every result ready at that moment, instead of a `subagent-result` message. For when the launcher cannot continue without the result. |
 | `subagent_check` | `taskId?` (id or unique prefix, ≥ 4 chars) | One line per own task, or the detail of one: status, model, turns, last result (≤ 64 KB), last 10 tool calls read from the child's session file. |
 | `subagent_send` | `taskId`, `message` | Queues a follow-up user message for an open subagent; its reply arrives like any other result. |
@@ -45,13 +45,13 @@ The tool guidelines tell the launcher to keep working or end its turn while a su
 | `worker` | all | Implementation; reports changed files, verification commands, leftovers. |
 | `oracle` | same as explorer | Second opinion: decision restated, risks, alternatives, one recommendation. |
 
-Unknown names in a tool allowlist are ignored by Pi, so a type may list tools from sibling extensions that are not installed. A type without a `model` inherits the **launcher's current model**.
+Unknown names in a tool allowlist are ignored by Pi, so a type may list tools from sibling extensions that are not installed. A type without a `model` inherits the **launcher's current model**. A `model` list is assigned round-robin per launch of that type (counted per launcher process), so parallel subagents of one type spread over several models and their rate limits.
 
 ### Overrides: `~/.pi/agent/subagents/<type>.md`
 
 ```markdown
 ---
-model: velox/glm-5-3
+model: [velox/glm-5-3, velox/deepseek-v4-flash]
 fallbackModel: google/gemini-2.5-flash-lite
 tools: [read, grep, find, ls, bash]
 skills: brainstorming, ./.pi/skills/repo-conventions
@@ -109,7 +109,7 @@ When this extension is loaded from a repo checkout with `-e` (as opposed to `~/.
 - No `tmux` or `pi` on `PATH`, unknown type, unresolvable skill, unknown or foreign task id: readable tool error, nothing launched.
 - tmux failures (bad server, no permission) are returned with tmux's stderr; the pre-written record is removed.
 - Caps: result in the hand-back and `subagent_wait` 16 KB, in `subagent_check` 64 KB; tool-call tail 10 entries × 80 chars.
-- No dependency scheduling, no result piping between tasks, no per-launch overrides, no Windows/non-tmux backend.
+- No dependency scheduling, no result piping between tasks, no per-launch overrides other than `model`, no Windows/non-tmux backend.
 - The launcher polls task files and `tmux list-panes` every 1.5 s while a task is starting or running, and every 10 s once all open tasks are idle and handed back. It stays fast for 30 s after a launch or `subagent_send`. The child polls its inbox every 1.5 s.
 
 ## Verification

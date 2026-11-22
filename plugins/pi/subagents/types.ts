@@ -16,8 +16,8 @@ export interface SubagentType {
   tools?: string[];
   /** Skill names or paths for `--skill`; undefined = Pi's normal skill discovery. */
   skills?: string[];
-  /** "provider/id"; undefined = inherit the launcher's current model. */
-  model?: string;
+  /** "provider/id" list, assigned round-robin per launch; undefined = inherit the launcher's current model. */
+  models?: string[];
   /** "provider/id" to switch to after the first provider error. */
   fallbackModel?: string;
 }
@@ -151,7 +151,7 @@ export async function resolveType(name: string): Promise<SubagentType> {
     prompt: [builtin?.prompt, override?.body].filter(Boolean).join("\n\n"),
     tools: stringList(fm.tools) ?? builtin?.tools,
     skills: stringList(fm.skills) ?? builtin?.skills,
-    model: stringOr(fm.model) ?? builtin?.model,
+    models: stringList(fm.model) ?? builtin?.models,
     fallbackModel: stringOr(fm.fallbackModel) ?? builtin?.fallbackModel,
   };
   return type;

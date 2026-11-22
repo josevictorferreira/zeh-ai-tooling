@@ -37,6 +37,8 @@ const CHECK_CAP = 64 * 1024;
 const CLOSE_WAIT_MS = 3000;
 const WAIT_DEFAULT_S = 600;
 const WAIT_MAX_S = 3600;
+// Launches per type in this process, for round-robin over a type's model list.
+const launchCount = new Map<string, number>();
 // Set per pane by the launcher or by tmux itself; never forwarded from the launcher.
 const NOT_FORWARDED = /^(PI_SUBAGENT_.*|TMUX|TMUX_PANE|TERM|TERM_PROGRAM|TERM_PROGRAM_VERSION|SHLVL|PWD|OLDPWD|_)$/;
 
@@ -304,6 +306,7 @@ export default function (pi: ExtensionAPI) {
       type: Type.String({ minLength: 1, description: "Subagent type: explorer, researcher, worker, oracle, or a user-defined type." }),
       title: Type.String({ minLength: 1, maxLength: 80, description: "Short title shown in the tmux pane and in listings." }),
       prompt: Type.String({ minLength: 1, description: "The complete task for the subagent, self-contained." }),
+      model: Type.Optional(Type.String({ minLength: 1, description: "\"provider/id\" for this launch only, replacing the type's model. Only when the user asks for a specific model." })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       let type;
@@ -321,7 +324,19 @@ export default function (pi: ExtensionAPI) {
       const root = rootOf(ctx);
       const id = newTaskId();
       const now = new Date().toISOString();
-      const model = type.model ?? (ctx.model ? ctx.model.provider + "/" + ctx.model.id : undefined);
+      let model = params.model;
+      if (!model && type.models) {
+        const n = launchCount.get(type.name) ?? 0;
+        launchCount.set(type.name, n + 1);
+        model = type.models[n % type.models.length];
+      }
+      if (model) {
+        const slash = model.indexOf("/");
+        if (slash <= 0 || !ctx.modelRegistry.find(model.slice(0, slash), model.slice(slash + 1))) {
+          return fail("unknown model \"" + model + "\"; expected \"provider/id\" of a configured model");
+        }
+      }
+      model ??= ctx.model ? ctx.model.provider + "/" + ctx.model.id : undefined;
       const record: TaskRecord = {
         id,
         parentSessionId: ctx.sessionManager.getSessionId(),

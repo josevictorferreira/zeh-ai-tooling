@@ -60,8 +60,8 @@ export function loadGovernorConfig(): GovernorConfig {
   const envEnabled = process.env.PI_GOVERNOR_ENABLED ?? "1";
   const enabled = !(envEnabled === "0" || envEnabled.toLowerCase() === "false" || envEnabled.toLowerCase() === "off");
 
-  let profile: ProfileName = "standard";
-  const envProfile = (process.env.PI_GOVERNOR_PROFILE ?? "standard").trim().toLowerCase();
+  let profile: ProfileName = "unlimited";
+  const envProfile = (process.env.PI_GOVERNOR_PROFILE ?? "unlimited").trim().toLowerCase();
   if (isProfileName(envProfile)) {
     profile = envProfile;
   }
@@ -123,7 +123,7 @@ export function createGovernorExtension() {
       pi.on("before_agent_start", async (_event, ctx) => {
         if (!warned && ctx.hasUI) {
           ctx.ui.notify(
-            `Governor: unknown profile "${rawEnvProfile}", falling back to standard`,
+            `Governor: unknown profile "${rawEnvProfile}", falling back to unlimited`,
             "warning",
           );
           warned = true;

@@ -231,7 +231,7 @@ test("/governor command supports inspect, set, and reset", async () => {
   // Default status
   await cmd.handler("", ctx);
   assert.match(notifications[0], /Governor status:/);
-  assert.match(notifications[0], /Profile: standard/);
+  assert.match(notifications[0], /Profile: unlimited/);
 
   // Set lean
   await cmd.handler("set lean", ctx);

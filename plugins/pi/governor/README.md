@@ -69,7 +69,7 @@ Resets the tool count and steering cadence for the current run (useful as an esc
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PI_GOVERNOR_ENABLED` | `1` | Set to `0`, `false`, or `off` to disable governor entirely. |
-| `PI_GOVERNOR_PROFILE` | `standard` | Default profile: `lean`, `standard`, `deep`, `unlimited`, or `off`. |
+| `PI_GOVERNOR_PROFILE` | `unlimited` | Default profile: `lean`, `standard`, `deep`, `unlimited`, or `off`. |
 | `PI_GOVERNOR_MAX_CHARS` | `4000` | Output length threshold before compaction is triggered. |
 | `PI_GOVERNOR_HEAD_CHARS` | `2400` | Maximum characters to retain from the output head. |
 | `PI_GOVERNOR_TAIL_CHARS` | `900` | Maximum characters to retain from the output tail. |
