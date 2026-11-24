@@ -72,6 +72,10 @@ _: {
             name = "GLM-5.3 (Velox)";
             limit.output = 131072;
           };
+          "glm-5-4" = {
+            name = "GLM-5.4 (Velox)";
+            limit.output = 131072;
+          };
           "minimax-m3" = {
             name = "MiniMax M3 (Velox)";
           };
