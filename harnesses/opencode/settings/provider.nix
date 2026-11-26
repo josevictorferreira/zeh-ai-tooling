@@ -60,6 +60,11 @@ _: {
           };
           "deepseek-v4-flash" = {
             name = "DeepSeek V4 Flash (Velox)";
+            attachment = true;
+            modalities = {
+              input = [ "text" "image" ];
+              output = [ "text" ];
+            };
           };
           "deepseek-v4-pro" = {
             name = "DeepSeek V4 Pro (Velox)";
@@ -75,6 +80,11 @@ _: {
           "glm-5-4" = {
             name = "GLM-5.4 (Velox)";
             limit.output = 131072;
+            attachment = true;
+            modalities = {
+              input = [ "text" "image" ];
+              output = [ "text" ];
+            };
           };
           "gemini-4-hydrogen-sonar" = {
             name = "Gemini 4 Hydrogen Sonar (Velox)";
@@ -93,6 +103,11 @@ _: {
           };
           "radagast" = {
             name = "Radagast (Velox)";
+            attachment = true;
+            modalities = {
+              input = [ "text" "image" ];
+              output = [ "text" ];
+            };
           };
           "gandalf" = {
             name = "Gandalf (Velox)";
