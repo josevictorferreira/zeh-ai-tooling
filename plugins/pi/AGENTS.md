@@ -12,7 +12,6 @@ Bun/TypeScript pi extensions, one directory each (`plugins/pi/<plugin>/index.ts`
 plugins/pi/
 ├── codegraph/      # CodeGraph CLI-backed semantic exploration
 ├── context7/       # Context7 documentation API client
-├── governor/       # Tool-budget enforcement, phase steering, lossless compaction (HarnessPro)
 ├── hindsight/      # Hindsight memory API and automatic retention
 ├── lsp/            # language-server client, configuration, and pi hooks
 ├── notify/         # desktop notifications for agent outcomes via notify-send
@@ -41,7 +40,6 @@ plugins/pi/
 | Understand or change the spoken-summary flow | `tts/index.ts`, `tts/queue.ts` | `/speak` command and `ctrl+alt+s` shortcut; Velox chat summary + audio speech, local playback behind a ticket-file queue shared with the Claude Code voice plugin (`.agents/specs/0002-tts-queue`). |
 | Understand or change the dictation flow | `stt/index.ts` | `/dictate` command and `ctrl+alt+d` shortcut; local recording via `pw-record`/`ffmpeg`, Velox transcription, transcript appended to the prompt editor. |
 | Understand or change desktop notifications | `notify/index.ts`, `.agents/specs/0002-notify/plan.md` | Classifies `agent_settled` outcomes into success/question/error; sends a `notify-send`-style argv via `pi.exec` with a 5 s timeout; dedupes by assistant message id. |
-| Understand or change governor budget/steering | `governor/index.ts`, `governor/profiles.ts`, `governor/compactor.ts`, `.agents/specs/0004-governor/plan.md` | Pure profiles/steering logic, head/tail line-bounded compaction, `/governor` slash command, `governor-run` custom entry telemetry. |
 | Understand the SKILL.state design and its limits | `.agents/specs/0001-skill-state-plan.md`, `skill-state/README.md` | Paper claims vs. what is reproduced; verification gates; honesty notes. |
 | Change the state-run loop, retry, or telemetry | `skill-state/runner.ts` | Algorithm 1: render → complete → parse/validate → merge → execute; rollback-retry ≤ 2; per-step telemetry; `onEvent` trace. |
 | Debug a state-run | `/state-log` in Pi, then `bun skill-state/tools/runlog.ts <runId> [--rejections | --step N --prompt] --cwd <project>` | Reads `~/.pi/agent/skill-state/<cwd>/logs/<runId>.jsonl`; `listRunLogs` in `runlog.ts` is shared by the command and the tool. |
