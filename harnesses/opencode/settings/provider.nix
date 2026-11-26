@@ -76,6 +76,9 @@ _: {
             name = "GLM-5.4 (Velox)";
             limit.output = 131072;
           };
+          "gemini-4-hydrogen-sonar" = {
+            name = "Gemini 4 Hydrogen Sonar (Velox)";
+          };
           "minimax-m3" = {
             name = "MiniMax M3 (Velox)";
           };
